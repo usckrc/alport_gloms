@@ -1,0 +1,359 @@
+---
+title: "Alports EC: Quantify EC Reversal Genes"
+author: "Jonathan Nelson"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document: 
+    toc: yes
+    toc_depth: 3
+    toc_float: true
+    number_sections: yes
+    theme: bootstrap
+    df_print: paged
+    code_folding: hide
+    highlight: pygments
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load Packages
+
+```{r load new packages, echo=TRUE, error=FALSE, message=FALSE, warning=FALSE}
+
+if (!require("knitr")) {install.packages("knitr"); require("knitr")}
+if (!requireNamespace('BiocManager', quietly = TRUE)) {install.packages('BiocManager'); require("BiocManager")}
+if (!require("dplyr")) {install.packages("dplyr"); require("dplyr")}
+if (!require("stringr")) {install.packages("stringr"); require("stringr")}
+if (!require("Seurat")) {install.packages("Seurat"); require("Seurat")}
+if (!require("sctransform")) {install.packages("sctransform"); require("sctransform")}
+if (!require("glmGamPoi")) {BiocManager::install('glmGamPoi'); require("glmGamPoi")}
+if (!require("patchwork")) {install.packages("patchwork"); require("patchwork")}
+if (!require("ggplot2")) {install.packages("ggplot2"); require("ggplot2")}
+if (!require("EnhancedVolcano")) {BiocManager::install('EnhancedVolcano'); require("EnhancedVolcano")}
+if (!require("DESeq2")) {BiocManager::install('DESeq2'); require("DESeq2")}
+if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")}
+if (!require("RColorBrewer")) {install.packages("RColorBrewer"); require("RColorBrewer")}
+if (!require("car")) {install.packages("car"); require("car")}
+if (!require("openxlsx")) {install.packages("openxlsx"); require("openxlsx")}
+if (!require("readxl")) {install.packages("readxl"); require("readxl")}
+if (!require("ggrepel")) {install.packages("ggrepel"); require("ggrepel")}
+if (!require("gghighlight")) {install.packages("gghighlight"); require("gghighlight")}
+if (!require("ggpmisc")) {install.packages("ggpmisc"); require("ggpmisc")}
+if (!require("data.table")) {install.packages("data.table"); require("data.table")}
+if (!require("here")) {install.packages("here"); require("here")}
+if (!require("clusterProfiler")) {BiocManager::install('clusterProfiler'); require("clusterProfiler")}
+if (!require("enrichplot")) {BiocManager::install('enrichplot'); require("enrichplot")}
+if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")} # for data frame transformation
+if (!require("gplots")) {install.packages("gplots"); require("gplots")}
+if (!require("ggvenn")) {install.packages("ggvenn"); require("ggvenn")}
+if (!require("ggrepel")) {install.packages("ggrepel"); require("ggrepel")}
+
+library("EnhancedVolcano")
+library(UpSetR)
+library(ComplexHeatmap)
+#install.packages("ggtext")
+library(ggtext)
+
+
+
+options(future.globals.maxSize = 74 * 1024^3) # 55 GB
+getOption("future.globals.maxSize") #59055800320
+
+here()
+```
+# Introduction
+
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+SO_EC_Clean <- readRDS(here("outputs", "Alports_Glom_EC.rds"))
+
+DimPlot(SO_EC_Clean)
+
+```
+# Identifying Reversal Genes
+
+## Set the conditions
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+Condition_Baseline <- "WT"
+
+Condition_A <- "4M_Alp"
+  
+Condition_B <- "4M_Alp_1EV"
+
+Condition_C <- "4M_Alp_2EV"
+
+Condition_D <- "6M_Alp"
+
+```
+
+## Create DEG lists
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+Idents(SO_EC_Clean) <- SO_EC_Clean@meta.data$subclass_EC
+
+df1 <- FindMarkers(SO_EC_Clean, ident.1 = Condition_A, ident.2 = Condition_Baseline, group.by = "group", subset.ident = "EC_glom", logfc.threshold = 0.1, min.pct = 0.1)
+
+df2 <- FindMarkers(SO_EC_Clean, ident.1 = Condition_B, ident.2 = Condition_A, group.by = "group", subset.ident = "EC_glom", logfc.threshold = 0.1, min.pct = 0.1)
+
+df3 <- FindMarkers(SO_EC_Clean, ident.1 = Condition_C, ident.2 = Condition_A, group.by = "group", subset.ident = "EC_glom", logfc.threshold = 0.1, min.pct = 0.1)
+
+df4 <- FindMarkers(SO_EC_Clean, ident.1 = Condition_D, ident.2 = Condition_A, group.by = "group", subset.ident = "EC_glom", logfc.threshold = 0.1, min.pct = 0.1)
+
+
+
+```
+
+## Split by Up and Down
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+df1_pos <- df1 %>% filter(avg_log2FC > 0) %>% filter(p_val_adj < 0.05) %>% arrange(desc(abs(avg_log2FC)))
+
+df1_pos
+
+df1_neg <- df1 %>% filter(avg_log2FC < 0) %>% filter(p_val_adj < 0.05) %>% arrange(desc(abs(avg_log2FC)))
+
+df1_neg
+
+df2_pos <- df2 %>% filter(avg_log2FC > 0) %>% filter(p_val_adj < 0.05) %>% arrange(desc(abs(avg_log2FC)))
+
+df2_pos
+
+df2_neg <- df2 %>% filter(avg_log2FC < 0) %>% filter(p_val_adj < 0.05) %>% arrange(desc(abs(avg_log2FC)))
+
+df2_neg
+
+df3_pos <- df3 %>% filter(avg_log2FC > 0) %>% filter(p_val_adj < 0.05) %>% arrange(desc(abs(avg_log2FC)))
+
+df3_pos
+
+df3_neg <- df3 %>% filter(avg_log2FC < 0) %>% filter(p_val_adj < 0.05) %>% arrange(desc(abs(avg_log2FC)))
+
+df3_neg
+
+df4_pos <- df4 %>% filter(avg_log2FC > 0) %>% filter(p_val_adj < 0.05) %>% arrange(desc(abs(avg_log2FC)))
+
+df4_pos
+
+df4_neg <- df4 %>% filter(avg_log2FC < 0) %>% filter(p_val_adj < 0.05) %>% arrange(desc(abs(avg_log2FC)))
+
+df4_neg
+
+```
+
+## Reversal Venn Diagrams
+
+### Up -> Down
+
+#### 4M vs 4M_1EV
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+set1 <- rownames(df1_pos)
+set2 <- rownames(df2_neg)
+venn <- ggvenn(list('Up in 4M' = set1, 'Down in 1EV' = set2))
+print(venn)
+
+lst <- list(set1, set2)
+ItemsList <- venn(lst, show.plot = TRUE)
+
+test <- attributes(ItemsList)$intersections
+
+genelist_4M_Alp_1EV <- test$'A:B'
+
+```
+
+#### 4M vs 4M_2EV
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+set1 <- rownames(df1_pos)
+set2 <- rownames(df3_neg)
+venn <- ggvenn(list('Up in 4M' = set1, 'Down in 2EV' = set2))
+print(venn)
+
+lst <- list(set1, set2)
+ItemsList <- venn(lst, show.plot = TRUE)
+
+test <- attributes(ItemsList)$intersections
+
+genelist_4M_Alp_2EV <- test$'A:B'
+
+```
+
+#### 4M vs 6M
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+set1 <- rownames(df1_pos)
+set2 <- rownames(df4_neg)
+venn <- ggvenn(list('Up in 4M' = set1, 'Down in 6M' = set2))
+print(venn)
+
+lst <- list(set1, set2)
+ItemsList <- venn(lst, show.plot = TRUE)
+
+test <- attributes(ItemsList)$intersections
+
+genelist_6M_Alp <- test$'A:B'
+
+```
+
+# Upset Plot Down in 4M vs Up in Others
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+df1_pos <- rownames(df1_pos)
+df2_neg <- rownames(df2_neg)
+df3_neg <- rownames(df3_neg)
+df4_neg <- rownames(df4_neg)
+
+my_lists <- list("4M_Alp" = df1_pos, "4M_Alp_1EV" = df2_neg, "4M_Alp_2EV" = df3_neg , "6M_Alp" = df4_neg)
+
+str(my_lists)
+
+list_to_matrix(my_lists)
+
+dfX <- list_to_matrix(my_lists)
+
+m1 <-  make_comb_mat(my_lists)
+m1
+
+UpSet(m1, comb_order = order(comb_size(m1)))
+
+```
+
+## Sanity Check
+
+### Check for genes with reversal in all treatments
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+df_sanity <- extract_comb(m1,"1111")
+
+df_sanity
+
+df_sanity2 <- head(df_sanity, 10)
+
+for (i in df_sanity2) {
+  A <- VlnPlot(SO_EC_Clean, i, split.by = "group")
+  print(A)
+}
+
+```
+
+
+
+
+### Down -> Up
+
+#### 4M vs 4M_1EV
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+set1 <- rownames(df1_neg)
+set2 <- rownames(df2_pos)
+venn <- ggvenn(list('Down in 4M' = set1, 'Up in 1EV' = set2))
+print(venn)
+
+lst <- list(set1, set2)
+ItemsList <- venn(lst, show.plot = TRUE)
+
+test <- attributes(ItemsList)$intersections
+
+genelist_4M_Alp_1EV <- test$'A:B'
+
+```
+
+#### 4M vs 4M_2EV
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+set1 <- rownames(df1_neg)
+set2 <- rownames(df3_pos)
+venn <- ggvenn(list('Down in 4M' = set1, 'Up in 2EV' = set2))
+print(venn)
+
+lst <- list(set1, set2)
+ItemsList <- venn(lst, show.plot = TRUE)
+
+test <- attributes(ItemsList)$intersections
+
+genelist_4M_Alp_2EV <- test$'A:B'
+
+```
+
+#### 4M vs 6M
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+set1 <- rownames(df1_neg)
+set2 <- rownames(df4_pos)
+venn <- ggvenn(list('Down in 4M' = set1, 'Up in 6M' = set2))
+print(venn)
+
+lst <- list(set1, set2)
+ItemsList <- venn(lst, show.plot = TRUE)
+
+test <- attributes(ItemsList)$intersections
+
+genelist_6M_Alp <- test$'A:B'
+
+```
+
+# Upset Plot Up in 4M vs Down in Others
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+df1_neg <- rownames(df1_neg)
+df2_pos <- rownames(df2_pos)
+df3_pos <- rownames(df3_pos)
+df4_pos <- rownames(df4_pos)
+
+my_lists <- list("4M_Alp" = df1_neg, "4M_Alp_1EV" = df2_pos, "4M_Alp_2EV" = df3_pos , "6M_Alp" = df4_pos)
+
+str(my_lists)
+
+list_to_matrix(my_lists)
+
+dfX <- list_to_matrix(my_lists)
+
+m1 <-  make_comb_mat(my_lists)
+m1
+
+UpSet(m1, comb_order = order(comb_size(m1)))
+
+```
+
+## Sanity Check
+
+### Check for genes with reversal in all treatments
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+df_sanity <- extract_comb(m1,"1111")
+
+df_sanity
+
+df_sanity2 <- head(df_sanity, 10)
+
+for (i in df_sanity2) {
+  A <- VlnPlot(SO_EC_Clean, i, split.by = "group")
+  print(A)
+}
+
+```
+
+# Session Info
+
+```{r sessioninfo, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+sessionInfo()
+
+```
+

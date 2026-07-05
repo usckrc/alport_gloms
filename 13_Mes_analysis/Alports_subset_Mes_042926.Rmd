@@ -1,0 +1,809 @@
+---
+title: "Alports Glom Mes Analysis"
+author: "Jonathan Nelson"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document: 
+    toc: yes
+    toc_depth: 3
+    toc_float: true
+    number_sections: yes
+    theme: bootstrap
+    df_print: paged
+    code_folding: hide
+    highlight: pygments
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load Packages
+
+```{r load new packages, echo=TRUE, error=FALSE, message=FALSE, warning=FALSE}
+
+if (!require("knitr")) {install.packages("knitr"); require("knitr")}
+if (!requireNamespace('BiocManager', quietly = TRUE)) {install.packages('BiocManager'); require("BiocManager")}
+if (!require("dplyr")) {install.packages("dplyr"); require("dplyr")}
+if (!require("stringr")) {install.packages("stringr"); require("stringr")}
+if (!require("Seurat")) {install.packages("Seurat"); require("Seurat")}
+if (!require("sctransform")) {install.packages("sctransform"); require("sctransform")}
+if (!require("glmGamPoi")) {BiocManager::install('glmGamPoi'); require("glmGamPoi")}
+if (!require("patchwork")) {install.packages("patchwork"); require("patchwork")}
+if (!require("ggplot2")) {install.packages("ggplot2"); require("ggplot2")}
+if (!require("EnhancedVolcano")) {BiocManager::install('EnhancedVolcano'); require("EnhancedVolcano")}
+if (!require("DESeq2")) {BiocManager::install('DESeq2'); require("DESeq2")}
+if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")}
+if (!require("RColorBrewer")) {install.packages("RColorBrewer"); require("RColorBrewer")}
+if (!require("car")) {install.packages("car"); require("car")}
+if (!require("openxlsx")) {install.packages("openxlsx"); require("openxlsx")}
+if (!require("readxl")) {install.packages("readxl"); require("readxl")}
+if (!require("ggrepel")) {install.packages("ggrepel"); require("ggrepel")}
+if (!require("gghighlight")) {install.packages("gghighlight"); require("gghighlight")}
+if (!require("ggpmisc")) {install.packages("ggpmisc"); require("ggpmisc")}
+if (!require("data.table")) {install.packages("data.table"); require("data.table")}
+if (!require("here")) {install.packages("here"); require("here")}
+if (!require("clusterProfiler")) {BiocManager::install('clusterProfiler'); require("clusterProfiler")}
+if (!require("enrichplot")) {BiocManager::install('enrichplot'); require("enrichplot")}
+if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")} # for data frame transformation
+if (!require("gplots")) {install.packages("gplots"); require("gplots")}
+if (!require("ggvenn")) {install.packages("ggvenn"); require("ggvenn")}
+if (!require("ggrepel")) {install.packages("ggrepel"); require("ggrepel")}
+if (!require("clusterProfiler")) {BiocManager::install('clusterProfiler'); require("clusterProfiler")}
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("org.Mm.eg.db")
+
+
+library("EnhancedVolcano")
+library(UpSetR)
+library(ComplexHeatmap)
+#install.packages("ggtext")
+library(ggtext)
+library(kableExtra) 
+
+
+options(future.globals.maxSize = 74 * 1024^3) # 55 GB
+getOption("future.globals.maxSize") #59055800320
+
+here()
+```
+
+# Introduction
+
+## Email from Sargis on 11/3/2025
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+SO <- readRDS(file = here("outputs", "Alports_041525.rds"))
+
+DimPlot(SO, label = T)
+
+```
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE}
+
+SO_mes <- subset(SO, idents = "MES")
+
+DimPlot(SO_mes, label = T)
+
+SO_mes <- SCTransform(SO_mes) %>%
+    RunPCA() %>%
+    FindNeighbors(dims = 1:30) %>%
+    FindClusters(resolution = 1) %>%
+    RunUMAP(dims = 1:30)
+
+DimPlot(SO_mes, label = T)
+
+DimPlot(SO_mes, label = T, group.by = "group")
+
+FeaturePlot(SO_mes, "Nphs2")
+
+VlnPlot(SO_mes, "Nphs2")
+
+FeaturePlot(SO_mes, "Kdr")
+
+VlnPlot(SO_mes, "Kdr")
+
+FeaturePlot(SO_mes, "Pdgfrb")
+
+VlnPlot(SO_mes, "Pdgfrb")
+
+```
+
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE}
+
+SO_mes <- subset(SO_mes, idents = c("3", "4", "7"), invert = TRUE)
+
+DimPlot(SO_mes)
+
+```
+
+
+## Heatmap
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE, fig.height=10}
+
+SO.markers <- FindAllMarkers(SO_mes, only.pos = TRUE, min.pct = .25)
+
+SO.markers %>%
+    group_by(cluster) %>%
+    dplyr::filter(avg_log2FC > 1) %>%
+    slice_head(n = 5) %>%
+    ungroup() -> top10
+
+DoHeatmap(SO_mes, features = top10$gene) + NoLegend() +
+  theme(plot.margin = margin(20, 80, 10, 10))
+
+```
+
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+t1 <- table(SO_mes@meta.data$seurat_clusters, SO_mes$group)[, c("WT", "4M_Alp", "4M_Alp_1EV", "4M_Alp_2EV", "6M_Alp")]
+#t1
+
+prop.t1 <- prop.table(t1, margin = 2) 
+#prop.t1
+
+t2 <- as.data.frame(t1)
+colnames(t2) <- c('Cell_type', 'Group', 'Frequency')
+
+# Original plot
+
+library(scales)   # ggplot2 depends on this
+
+# ggplot2 default discrete palette (6 colors)
+my_colors2 <- scales::hue_pal()(12)
+
+
+ggplot(t2, aes(fill=Cell_type, y=Frequency, x=Group)) + 
+  geom_bar(position="fill", stat = "identity", fun.y = "mean", colour="black") +
+  scale_fill_manual(values = my_colors2) +
+  theme_classic()
+
+```
+
+#### DEG Setup
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+Condition_Baseline <- "WT"
+
+Condition_A <- "4M_Alp"
+  
+Condition_B <- "4M_Alp_1EV"
+
+Condition_C <- "4M_Alp_2EV"
+
+Condition_D <- "6M_Alp"
+
+clusters <- unique(SO_mes@meta.data$class_merge)
+names(clusters) <- clusters
+
+SO <- PrepSCTFindMarkers(SO_mes)
+DEG.env <- new.env()
+
+Idents(SO_mes) <- SO_mes@meta.data$group
+
+DefaultAssay(SO_mes) <- "SCT"
+
+```
+
+#### df1
+
+4M_Alp vs. WT
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+DEGs <- FindMarkers(SO_mes, ident.1 = Condition_A, ident.2 = Condition_Baseline, logfc.threshold = .1, min.pct = .1)
+DEGs <- DEGs %>% rownames_to_column("gene") %>% filter(p_val_adj < .05)
+DEGs <- DEGs[order(DEGs[,"avg_log2FC"], decreasing = TRUE),]
+
+#remove the first column of from the dataframe DEGs
+DEGs <- rownames_to_column(DEGs)
+DEGs <- DEGs[,-1]
+
+df <- head(DEGs, 20)
+
+df
+
+df1 <- DEGs
+
+
+```
+
+#### df2
+
+4M_Alp_1EV vs. 4M_Alp
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+DEGs <- FindMarkers(SO_mes, ident.1 = Condition_B, ident.2 = Condition_A, logfc.threshold = .1, min.pct = .1)
+DEGs <- DEGs %>% rownames_to_column("gene") %>% filter(p_val_adj < .05)
+DEGs <- DEGs[order(DEGs[,"avg_log2FC"], decreasing = TRUE),]
+
+#remove the first column of from the dataframe DEGs
+DEGs <- rownames_to_column(DEGs)
+DEGs <- DEGs[,-1]
+
+df <- head(DEGs, 20)
+
+df
+
+df2 <- DEGs
+
+
+```
+
+#### df3
+
+4M_Alp_2EV vs. 4M_Alp
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+DEGs <- FindMarkers(SO_mes, ident.1 = Condition_C, ident.2 = Condition_A, logfc.threshold = .1, min.pct = .1)
+DEGs <- DEGs %>% rownames_to_column("gene") %>% filter(p_val_adj < .05)
+DEGs <- DEGs[order(DEGs[,"avg_log2FC"], decreasing = TRUE),]
+
+#remove the first column of from the dataframe DEGs
+DEGs <- rownames_to_column(DEGs)
+DEGs <- DEGs[,-1]
+
+df <- head(DEGs, 20)
+
+df
+
+df3 <- DEGs
+
+```
+
+#### df4
+
+Corrected from original version on 3.6.26 (orginal comparison was 6M_Alp vs. WT...this is moved to df5)
+
+6M_Alp vs. 4M_Alp
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+DEGs <- FindMarkers(SO_mes, ident.1 = Condition_D, ident.2 = Condition_A, logfc.threshold = .1, min.pct = .1)
+DEGs <- DEGs %>% rownames_to_column("gene") %>% filter(p_val_adj < .05)
+DEGs <- DEGs[order(DEGs[,"avg_log2FC"], decreasing = TRUE),]
+
+#remove the first column of from the dataframe DEGs
+DEGs <- rownames_to_column(DEGs)
+DEGs <- DEGs[,-1]
+
+df <- head(DEGs, 20)
+
+df
+
+df4 <- DEGs
+
+```
+
+#### df5
+
+6M_Alp vs. WT
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+DEGs <- FindMarkers(SO_mes, ident.1 = Condition_D, ident.2 = Condition_Baseline, logfc.threshold = .1, min.pct = .1)
+DEGs <- DEGs %>% rownames_to_column("gene") %>% filter(p_val_adj < .05)
+DEGs <- DEGs[order(DEGs[,"avg_log2FC"], decreasing = TRUE),]
+
+#remove the first column of from the dataframe DEGs
+DEGs <- rownames_to_column(DEGs)
+DEGs <- DEGs[,-1]
+
+df <- head(DEGs, 20)
+
+df
+
+df5 <- DEGs
+
+```
+
+
+#### Write Spreadsheet of DEG Lits
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+# Create workbook
+wb <- createWorkbook()
+
+# Add sheets + write data
+addWorksheet(wb, "df1 - 4M_Alp vs. WT")
+writeData(wb, "df1 - 4M_Alp vs. WT", df1)
+
+addWorksheet(wb, "df2 - 4M_Alp_1EV vs. 4M_Alp")
+writeData(wb, "df2 - 4M_Alp_1EV vs. 4M_Alp", df2)
+
+addWorksheet(wb, "df3 - 4M_Alp_2EV vs. 4M_Alp")
+writeData(wb, "df3 - 4M_Alp_2EV vs. 4M_Alp", df3)
+
+addWorksheet(wb, "df4 - 6M_Alp vs. 4M_Alp")
+writeData(wb, "df4 - 6M_Alp vs. 4M_Alp", df4)
+
+addWorksheet(wb, "df5 - 6M_Alp vs. WT")
+writeData(wb, "df5 - 6M_Alp vs. WT", df5)
+
+# Save workbook
+saveWorkbook(wb, "MES_compiled_DEG_lists_042926.xlsx", overwrite = TRUE)
+
+```
+
+#### Filter and Split Positive and Negative Lists
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+df_summary <- tibble(
+  dataframe = c("df1", "df2", "df3", "df4", "df5"),
+  nrows = c(nrow(df1), nrow(df2), nrow(df3), nrow(df4), nrow(df5))
+)
+
+# Plot
+ggplot(df_summary, aes(x = dataframe, y = nrows, fill = dataframe)) +
+  geom_col() +
+  labs(
+    title = "Number of DEGs",
+    x = "Dataframe",
+    y = "Number of DEGs"
+  ) +
+  theme_classic() +
+  theme(legend.position = "none")
+
+
+
+
+```
+
+
+#### Filter and Split Positive and Negative Lists
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+df1_pos <- df1 %>% filter(avg_log2FC > 0) %>% filter(p_val_adj < 0.05) %>% filter(avg_log2FC > .25) %>% arrange(desc(abs(avg_log2FC)))
+
+df1_pos
+
+df1_neg <- df1 %>% filter(avg_log2FC < 0) %>% filter(p_val_adj < 0.05) %>% filter(avg_log2FC < -.25) %>% arrange(desc(abs(avg_log2FC)))
+
+df1_neg
+
+df2_pos <- df2 %>% filter(avg_log2FC > 0) %>% filter(p_val_adj < 0.05) %>% filter(avg_log2FC > .25) %>% arrange(desc(abs(avg_log2FC)))
+
+df2_pos
+
+df2_neg <- df2 %>% filter(avg_log2FC < 0) %>% filter(p_val_adj < 0.05) %>% filter(avg_log2FC < -.25) %>% arrange(desc(abs(avg_log2FC)))
+
+df2_neg
+
+df3_pos <- df3 %>% filter(avg_log2FC > 0) %>% filter(p_val_adj < 0.05) %>% filter(avg_log2FC > .25) %>% arrange(desc(abs(avg_log2FC)))
+
+df3_pos
+
+df3_neg <- df3 %>% filter(avg_log2FC < 0) %>% filter(p_val_adj < 0.05) %>% filter(avg_log2FC < -.25) %>% arrange(desc(abs(avg_log2FC)))
+
+df3_neg
+
+df4_pos <- df4 %>% filter(avg_log2FC > 0) %>% filter(p_val_adj < 0.05) %>% filter(avg_log2FC > .25) %>% arrange(desc(abs(avg_log2FC)))
+
+df4_pos
+
+df4_neg <- df4 %>% filter(avg_log2FC < 0) %>% filter(p_val_adj < 0.05) %>% filter(avg_log2FC < -.25) %>% arrange(desc(abs(avg_log2FC)))
+
+df4_neg
+
+df5_pos <- df5 %>% filter(avg_log2FC > 0) %>% filter(p_val_adj < 0.05) %>% filter(avg_log2FC > .25) %>% arrange(desc(abs(avg_log2FC)))
+
+df5_pos
+
+df5_neg <- df5 %>% filter(avg_log2FC < 0) %>% filter(p_val_adj < 0.05) %>% filter(avg_log2FC < -.25) %>% arrange(desc(abs(avg_log2FC)))
+
+df5_neg
+
+# List only the pos/neg data frames
+dfs <- list(
+  df1_pos = df1_pos,
+  df1_neg = df1_neg,
+  df2_pos = df2_pos,
+  df2_neg = df2_neg,
+  df3_pos = df3_pos,
+  df3_neg = df3_neg,
+  df4_pos = df4_pos,
+  df4_neg = df4_neg,
+  df5_pos = df5_pos,
+  df5_neg = df5_neg
+)
+
+# Create summary table
+df_summary <- tibble(
+  dataframe = names(dfs),
+  nrows = sapply(dfs, nrow),
+  group = sub("_(pos|neg)$", "", names(dfs)),  # extract df1, df2, df3, df4
+  type = sub("^df[0-9]+_", "", names(dfs))     # extract pos / neg
+)
+
+# Plot grouped bars
+ggplot(df_summary, aes(x = group, y = nrows, fill = type)) +
+  geom_col(position = "dodge") +
+  labs(
+    title = "Number of DEGs",
+    x = "Dataframe",
+    y = "DEGs",
+    fill = "Subset"
+  ) +
+  theme_classic()
+
+```
+
+### Improved Graphs on 030626
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+df_summary <- tibble(
+  dataframe = c("mid-AS", "late-AS"),
+  nrows = c(nrow(df1), nrow(df5))
+)
+
+df_summary <- df_summary %>%
+  mutate(dataframe = factor(dataframe, levels = c("mid-AS", "late-AS")))
+
+# Plot
+ggplot(df_summary, aes(x = dataframe, y = nrows, fill = dataframe)) +
+  geom_col() +
+  labs(
+    title = NULL,
+    x = NULL,
+    y = "Number of DEGs"
+  ) +
+  theme_classic() +
+  theme(
+    axis.ticks = element_line(size = 2),   # 1.2 * 3
+    axis.line = element_line(size = 2),    # 1.2 * 3
+    axis.title = element_text(size = 24),    # 20 * 2
+    axis.text = element_text(size = 24),     # 16 * 2
+    legend.position = "none"
+  )
+
+```
+
+
+### Improved Graphs on 030626
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+dfs <- list(
+  df1_pos = df1_pos,
+  df1_neg = df1_neg,
+  df5_pos = df5_pos,
+  df5_neg = df5_neg
+)
+
+# Create summary table
+df_summary2 <- tibble(
+  dataframe = names(dfs),
+  nrows = sapply(dfs, nrow),
+  group = sub("_(pos|neg)$", "", names(dfs)),  # extract df1, df2, df3, df4
+  type = sub("^df[0-9]+_", "", names(dfs))     # extract pos / neg
+)
+
+df_summary2 <- df_summary2 %>%
+  mutate(group = case_when(
+    group == "df1" ~ "mid-AS",
+    group == "df5" ~ "late-AS",
+    TRUE ~ group
+  ))
+
+df_summary2 <- df_summary2 %>%
+  mutate(group = factor(group, levels = c("mid-AS", "late-AS")))
+
+# Plot grouped bars
+ggplot(df_summary2, aes(x = group, y = nrows, fill = type)) +
+  geom_col(position = "dodge") +
+  labs(
+    title = NULL,
+    x = NULL,
+    y = "DEGs",
+    fill = "Subset"
+  ) +
+  theme_classic() +
+  theme(
+    axis.ticks = element_line(size = 2),
+    axis.line = element_line(size = 2),
+    axis.title = element_text(size = 24),
+    axis.text = element_text(size = 24),
+    legend.title = element_text(size = 24),
+    legend.text = element_text(size = 24)
+  )
+
+```
+# Q4
+
+## Pseudobulk PCA
+
+### ALL GROUPS
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+# head(SO_mes@meta.data)
+
+pbo <- AggregateExpression(SO_mes, 
+                           group.by = "sample",
+                           assays = 'RNA', 
+                           slot = "counts",
+                           return.seurat = FALSE)
+
+pbo <- pbo$RNA
+# pbo[1:5, 1:5]
+colnames(pbo) <- sub("^g", "", colnames(pbo))
+# colnames(pbo)[1:5]
+
+# DimPlot(SO_mes, group.by = "sample")
+
+metadata <- SO_mes@meta.data %>%
+  as.data.frame() %>%
+  dplyr::group_by(sample) %>%
+  dplyr::summarise(
+    Alports = names(sort(table(alports), decreasing = TRUE))[1],  # Most common value
+    Batch = names(sort(table(batch), decreasing = TRUE))[1],
+    Group = names(sort(table(group), decreasing = TRUE))[1]
+  ) %>%
+  as.data.frame()
+
+rownames(metadata) <- metadata$sample
+
+# head(metadata)
+
+dds <- DESeqDataSetFromMatrix(countData = round(pbo),
+                              colData = metadata,
+                              design = ~ sample)
+
+rld <- rlog(dds, blind=TRUE)
+
+sample_names <- unique(rld$sample)
+
+```
+
+#### PCA By **Sample**
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+# Plot PCA
+sample<-DESeq2::plotPCA(rld, ntop = 1000, intgroup = "sample") + 
+  geom_text_repel(aes(label = sample_names)) +
+  coord_fixed(ratio = 1.5) +
+  theme_classic()
+
+plot(sample)
+
+```
+
+#### PCA By **Alports**
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+alports <-DESeq2::plotPCA(rld, ntop = 1000, intgroup = "Alports") + 
+  geom_text_repel(aes(label = sample_names)) +
+  coord_fixed(ratio = 1.5) +
+  theme_classic()
+
+plot(alports)
+
+```
+
+#### PCA By **Group**
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+group <-DESeq2::plotPCA(rld, ntop = 1000, intgroup = "Group") + 
+  geom_text_repel(aes(label = sample_names)) +
+  coord_fixed(ratio = 1.5) +
+  theme_classic()
+
+plot(group)
+
+
+```
+
+### No 6M Alports
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+# head(SO_mes@meta.data)
+
+pbo <- AggregateExpression(SO_mes, 
+                           group.by = "sample",
+                           assays = 'RNA', 
+                           slot = "counts",
+                           return.seurat = FALSE)
+
+pbo <- pbo$RNA
+# pbo[1:5, 1:5]
+colnames(pbo) <- sub("^g", "", colnames(pbo))
+pbo <- pbo[, !colnames(pbo) %in% c("A", "B", "C")]
+#colnames(pbo)
+
+# DimPlot(SO_mes, group.by = "sample")
+
+metadata <- SO_mes@meta.data %>%
+  as.data.frame() %>%
+  dplyr::group_by(sample) %>%
+  dplyr::summarise(
+    Alports = names(sort(table(alports), decreasing = TRUE))[1],  # Most common value
+    Batch = names(sort(table(batch), decreasing = TRUE))[1],
+    Group = names(sort(table(group), decreasing = TRUE))[1]
+  ) %>%
+  as.data.frame()
+
+metadata <- metadata %>% 
+  dplyr::filter(Group != "6M_Alp")
+
+rownames(metadata) <- metadata$sample
+
+# head(metadata)
+
+dds <- DESeqDataSetFromMatrix(countData = round(pbo),
+                              colData = metadata,
+                              design = ~ sample)
+
+rld <- rlog(dds, blind=TRUE)
+
+sample_names <- unique(rld$sample)
+
+```
+
+#### PCA By **Sample**
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+# Plot PCA
+sample<-DESeq2::plotPCA(rld, ntop = 1000, intgroup = "sample") + 
+  geom_text_repel(aes(label = sample_names)) +
+  coord_fixed(ratio = 1.5) +
+  theme_classic()
+
+plot(sample)
+
+```
+
+#### PCA By **Alports**
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+alports <-DESeq2::plotPCA(rld, ntop = 1000, intgroup = "Alports") + 
+  geom_text_repel(aes(label = sample_names)) +
+  coord_fixed(ratio = 1.5) +
+  theme_classic()
+
+plot(alports)
+
+```
+
+#### PCA By **Group**
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+group <-DESeq2::plotPCA(rld, ntop = 1000, intgroup = "Group") + 
+  geom_text_repel(aes(label = sample_names)) +
+  coord_fixed(ratio = 1.5) +
+  theme_classic()
+
+plot(group)
+
+
+```
+
+
+### No EVs
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+# head(SO_mes@meta.data)
+
+pbo <- AggregateExpression(SO_mes, 
+                           group.by = "sample",
+                           assays = 'RNA', 
+                           slot = "counts",
+                           return.seurat = FALSE)
+
+pbo <- pbo$RNA
+# pbo[1:5, 1:5]
+colnames(pbo) <- sub("^g", "", colnames(pbo))
+pbo <- pbo[, !colnames(pbo) %in% c("473", "375", "364", "368", "475", "362")]
+#colnames(pbo)
+
+# DimPlot(SO_mes, group.by = "sample")
+
+metadata <- SO_mes@meta.data %>%
+  as.data.frame() %>%
+  dplyr::group_by(sample) %>%
+  dplyr::summarise(
+    Alports = names(sort(table(alports), decreasing = TRUE))[1],  # Most common value
+    Batch = names(sort(table(batch), decreasing = TRUE))[1],
+    Group = names(sort(table(group), decreasing = TRUE))[1]
+  ) %>%
+  as.data.frame()
+
+metadata <- metadata %>% 
+  dplyr::filter(Group != "4M_Alp_1EV")
+
+metadata <- metadata %>% 
+  dplyr::filter(Group != "4M_Alp_2EV")
+
+rownames(metadata) <- metadata$sample
+
+# head(metadata)
+
+dds <- DESeqDataSetFromMatrix(countData = round(pbo),
+                              colData = metadata,
+                              design = ~ sample)
+
+rld <- rlog(dds, blind=TRUE)
+
+sample_names <- unique(rld$sample)
+
+```
+
+#### PCA By **Sample**
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+# Plot PCA
+sample<-DESeq2::plotPCA(rld, ntop = 1000, intgroup = "sample") + 
+  geom_text_repel(aes(label = sample_names)) +
+  coord_fixed(ratio = 1.5) +
+  theme_classic()
+
+plot(sample)
+
+```
+
+#### PCA By **Alports**
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+alports <-DESeq2::plotPCA(rld, ntop = 1000, intgroup = "Alports") + 
+  geom_text_repel(aes(label = sample_names)) +
+  coord_fixed(ratio = 1.5) +
+  theme_classic()
+
+plot(alports)
+
+```
+
+#### PCA By **Group**
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+group <-DESeq2::plotPCA(rld, ntop = 1000, intgroup = "Group") + 
+  geom_text_repel(aes(label = sample_names)) +
+  coord_fixed(ratio = 1.5) +
+  theme_classic()
+
+plot(group)
+
+
+```
+
+# Session Info
+
+```{r sessioninfo, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+sessionInfo()
+
+```
+

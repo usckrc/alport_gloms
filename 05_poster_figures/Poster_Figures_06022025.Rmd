@@ -1,0 +1,355 @@
+---
+title: "Podocyte Meeting Poster Figures"
+author: "Jonathan Nelson"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document: 
+    toc: yes
+    toc_depth: 3
+    toc_float: true
+    number_sections: yes
+    theme: bootstrap
+    df_print: paged
+    code_folding: hide
+    highlight: pygments
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load Packages
+
+```{r load new packages, echo=TRUE, error=FALSE, message=FALSE, warning=FALSE}
+
+if (!require("knitr")) {install.packages("knitr"); require("knitr")}
+if (!requireNamespace('BiocManager', quietly = TRUE)) {install.packages('BiocManager'); require("BiocManager")}
+if (!require("dplyr")) {install.packages("dplyr"); require("dplyr")}
+if (!require("stringr")) {install.packages("stringr"); require("stringr")}
+if (!require("Seurat")) {install.packages("Seurat"); require("Seurat")}
+if (!require("sctransform")) {install.packages("sctransform"); require("sctransform")}
+if (!require("glmGamPoi")) {BiocManager::install('glmGamPoi'); require("glmGamPoi")}
+if (!require("patchwork")) {install.packages("patchwork"); require("patchwork")}
+if (!require("ggplot2")) {install.packages("ggplot2"); require("ggplot2")}
+if (!require("EnhancedVolcano")) {BiocManager::install('EnhancedVolcano'); require("EnhancedVolcano")}
+if (!require("DESeq2")) {BiocManager::install('DESeq2'); require("DESeq2")}
+if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")}
+if (!require("RColorBrewer")) {install.packages("RColorBrewer"); require("RColorBrewer")}
+if (!require("car")) {install.packages("car"); require("car")}
+if (!require("openxlsx")) {install.packages("openxlsx"); require("openxlsx")}
+if (!require("readxl")) {install.packages("readxl"); require("readxl")}
+if (!require("ggrepel")) {install.packages("ggrepel"); require("ggrepel")}
+if (!require("gghighlight")) {install.packages("gghighlight"); require("gghighlight")}
+if (!require("ggpmisc")) {install.packages("ggpmisc"); require("ggpmisc")}
+if (!require("data.table")) {install.packages("data.table"); require("data.table")}
+if (!require("here")) {install.packages("here"); require("here")}
+
+options(future.globals.maxSize = 74 * 1024^3) # 55 GB
+getOption("future.globals.maxSize") #59055800320
+
+here()
+```
+
+# Loading Datasets
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+SO_all <- readRDS(here("outputs", "Alports_041525.rds"))
+
+```
+
+# The UMAP of glom cells
+
+## Option 1
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+DimPlot(SO_all) + 
+  ylab("UMAP 2") +
+  xlab("UMAP 1") +
+  theme_classic() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 20),
+    axis.line = element_line(size = 1, colour = "black"),
+    axis.text = element_blank(),          # Remove axis text
+    axis.ticks = element_blank(),         # Optional: Remove axis ticks
+    text = element_text(size = 20)
+  )
+
+
+
+```
+
+## Option 2
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center', fig.width = 8}
+
+SO_all@meta.data <- SO_all@meta.data %>% 
+  mutate(class_poster_name = dplyr::case_when(
+    class_merge == "EC"  ~ "Endothelial Cell",
+    class_merge == "IMM"  ~ "Immune Cell",
+    class_merge == "MES"  ~ "Mesangial Cell",
+    class_merge == "PODO"  ~ "Podocyte",
+    class_merge == "PEC"  ~ "Parietal Epithelial Cell",
+    class_merge == "VSMC"  ~ "Vascular Smooth Muscle Cell"
+    ))
+
+SO_all@meta.data$class_poster_name <- factor(SO_all@meta.data$class_poster_name, levels = c("Endothelial Cell", "Immune Cell", "Mesangial Cell", "Podocyte", "Parietal Epithelial Cell", "Vascular Smooth Muscle Cell"))
+
+DimPlot(SO_all, group.by = "class_poster_name") + 
+  ylab("UMAP 2") +
+  xlab("UMAP 1") +
+  theme_classic() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 20),
+    axis.line = element_line(size = 1, colour = "black"),
+    axis.text = element_blank(),          # Remove axis text
+    axis.ticks = element_blank(),         # Optional: Remove axis ticks
+    text = element_text(size = 20)
+  ) + 
+  ggtitle("")
+
+```
+
+## Extra
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center', fig.height=6, fig.width=6}
+
+markers.to.plot1 <- c(
+                      "Flt1",        # Endo
+                      "Ptprc",        # Immune
+                      "Pdgfrb",       # Mesangial
+                      "Nphs2",        # Podo        
+                      "Ncam1",        # PEC
+                      "Acta2"        # VSMC
+)    
+
+DotPlot(SO_all,
+        features = markers.to.plot1,
+        dot.scale = 10,
+        dot.min = 0,
+        scale.max = 100,
+        scale.min = 0,
+        col.min = -2.5,
+        col.max = 2.5,
+        group.by = "class_poster_name") +
+  coord_flip() +
+  theme_classic() +
+  theme(axis.line = element_line(size = 1, colour = "black"),
+        axis.ticks.x = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        text = element_text(size = 20),
+        axis.text.x = element_text(angle = 45, hjust = 1)) +  # <- this line tilts the x-axis labels
+  xlab(NULL) +
+  ylab(NULL)
+
+
+```
+
+# Cell Type DEG
+
+a.	could you please reduce the width of the graph, I have only limited space? <br>
+b.	I suggest removing "Alport" and "4M" on the x-axis and displaying only the cell type names. <br>
+c.	I suggest renaming the graph title to "Glomerular Cell type DEGs". I can define Alport and 4M in the legend. <br> 
+
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center', fig.width=4, fig.height=4}
+
+rm(list = ls())
+
+load(here("outputs", "Alports_4M_Condition_DEGs.Rdata"))
+
+# List the objects in the environment
+  objects_in_environment <- ls()
+
+data_frames <- Filter(is.data.frame, mget(ls()))
+
+# Initialize an empty data frame to store the results
+output_table <- data.frame(Data_Frame = character(),
+                           Number_of_Obs = numeric(),
+                           Number_of_Positive_Log2FC = numeric(),
+                           Number_of_Negative_Log2FC = numeric(),
+                           stringsAsFactors = FALSE)
+
+# Loop through each data frame
+for (df_name in names(data_frames)) {
+  df <- data_frames[[df_name]]
+  
+  # Get the number of observations in the data frame
+  num_obs <- nrow(df)
+  
+  # Count the number of observations with positive log2FC
+  positive_count <- sum(df$avg_log2FC > 0)
+  
+  # Count the number of observations with negative log2FC
+  negative_count <- sum(df$avg_log2FC < 0)
+  
+  # Create a row in the output table
+  output_row <- data.frame(Data_Frame = df_name,
+                           Number_of_Obs = num_obs,
+                           Number_of_Positive_Log2FC = positive_count,
+                           Number_of_Negative_Log2FC = negative_count,
+                           stringsAsFactors = FALSE)
+  
+  # Append the row to the output table
+  output_table <- rbind(output_table, output_row)
+}
+
+# Print the output table
+print(output_table)
+
+# Measure the total number of DEGs (sum of output_table$Number_of_Obs)
+v1 <-sum(output_table$Number_of_Obs)
+print("Total Number of DEGs")
+
+print(v1)
+
+output_table2 <- output_table %>% 
+                 mutate(Data_Frame = sub(".*\\.", "", Data_Frame)) %>%
+                 arrange(desc(Number_of_Obs)) %>%
+                 mutate(Data_Frame = factor(Data_Frame, levels = unique(Data_Frame)))
+
+output_table2$Data_Frame <- gsub("Alports_4M_", "", output_table2$Data_Frame)
+
+p1 <- ggplot(output_table2, aes(x = Data_Frame)) +
+  geom_bar(aes(y = Number_of_Positive_Log2FC), stat = "identity", fill = "coral2", width = 0.5) +
+  geom_bar(aes(y = -Number_of_Negative_Log2FC), stat = "identity", fill = "dodgerblue2", width = 0.5) +
+  labs(x = "", y = "Number of DEGs") +
+  ggtitle("Glomerular Cell Type DEGs") +
+  scale_y_continuous(labels = function(x) abs(x)) +
+  annotate("text", x = Inf, y = Inf, label = "Positive Log2FC", color = "coral2",
+           hjust = 1, vjust = 1, size = 8) +
+  annotate("text", x = Inf, y = Inf, label = "Negative Log2FC", color = "dodgerblue2",
+           hjust = 1, vjust = 2.1, size = 8) +
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.title = element_text(hjust = 0.5, size = 20),
+        axis.text = element_text(color = "black", size = 14),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+        axis.title = element_text(color = "black", size = 16))
+
+p1
+
+```
+
+## Option 2
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+ p1 <- ggplot(output_table2, aes(x = Data_Frame)) +
+  geom_bar(aes(y = Number_of_Positive_Log2FC), stat = "identity", fill = "coral2") +
+  geom_bar(aes(y = -Number_of_Negative_Log2FC), stat = "identity", fill = "dodgerblue2") +
+  labs(x = "", y = "Number of DEGs") +
+  ggtitle("Glomerular Cell Type DEGs") +
+  scale_y_continuous(labels = function(x) abs(x)) +
+  annotate("text", x = Inf, y = Inf, label = "Positive Log2FC", color = "coral2",
+           hjust = 1, vjust = 1, size = 8) +
+  annotate("text", x = Inf, y = Inf, label = "Negative Log2FC", color = "dodgerblue2",
+           hjust = 1, vjust = 2.1, size = 8) +
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.title = element_text(hjust = 0.5, size = 24),
+        axis.text = element_text(color = "black", size = 14,),
+        axis.text.x = element_text(color = "black", size = 14, angle = 45, hjust = 1, vjust = 1),
+        axis.title = element_text(color = "black", size = 20,))
+
+p1
+
+```
+
+# GEC UMAP with subclusters
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE}
+
+SO_ec <- readRDS(here("outputs", "Alports_Glom_EC.rds"))
+
+DimPlot(SO_ec) + 
+  ylab("UMAP 2") +
+  xlab("UMAP 1") +
+  theme_classic() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 20),
+    axis.line = element_line(size = 1, colour = "black"),
+    axis.text = element_blank(),          # Remove axis text
+    axis.ticks = element_blank(),         # Optional: Remove axis ticks
+    text = element_text(size = 20)
+  ) + 
+  ggtitle("")
+
+
+```
+
+# GEC subclusters
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE}
+
+
+SO_ec@meta.data <- SO_ec@meta.data %>% 
+  mutate(class_poster_group_name = dplyr::case_when(
+    group == "WT"  ~ "WT",
+    group == "4M_Alp"  ~ "4M Alports",
+    group == "4M_Alp_1EV"  ~ "4M Alports 1EV",
+    group == "4M_Alp_2EV"  ~ "4M Alports 2EV",
+    group == "6M_Alp"  ~ "6M Alports"
+    ))
+
+t1 <- table(SO_ec@meta.data$seurat_clusters, SO_ec@meta.data$class_poster_group_name)[, c("WT", "4M Alports", "4M Alports 1EV", "4M Alports 2EV", "6M Alports")]
+t1
+
+prop.t1 <- prop.table(t1, margin = 2) 
+prop.t1
+
+t2 <- as.data.frame(t1)
+colnames(t2) <- c('Cell_type', 'Group', 'Frequency')
+
+ggplot(t2, aes(fill=Cell_type, y=Frequency, x=Group)) + 
+  geom_bar(position="fill", stat = "identity", fun.y = "mean", colour="black") +
+  theme_classic() +
+  theme(axis.line = element_line(size = 1, colour = "black"),
+        axis.ticks.x = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        text = element_text(size=20),
+        axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(fill = "Cell Type") +
+  xlab(NULL)
+
+
+```
+
+
+# GEC UMAP by group ( 6M Alport removed) 
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE, fig.width=16, fig.height=5}
+
+SO_ec_2 <- subset(SO_ec, subset = group != "6M_Alp")
+
+DimPlot(SO_ec_2, reduction = "umap", split.by = "group", group.by = "seurat_clusters") +
+  xlab("UMAP 1") +
+  ylab("UMAP 2") +
+  ggtitle("") +
+  theme_classic() +
+  theme(
+    axis.line = element_line(size = 1, colour = "black"),
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    strip.text = element_blank(),  # <- This removes facet titles
+    text = element_text(size = 20)
+  )
+
+```
+
+# Session Info
+
+```{r sessioninfo, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+sessionInfo()
+
+```
+

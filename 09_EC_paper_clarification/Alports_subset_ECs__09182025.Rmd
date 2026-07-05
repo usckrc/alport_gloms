@@ -1,0 +1,190 @@
+---
+title: "Alports Merging and Filtering"
+author: "Jonathan Nelson"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document: 
+    toc: yes
+    toc_depth: 3
+    toc_float: true
+    number_sections: yes
+    theme: bootstrap
+    df_print: paged
+    code_folding: hide
+    highlight: pygments
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load Packages
+
+```{r load new packages, echo=TRUE, error=FALSE, message=FALSE, warning=FALSE}
+
+if (!require("knitr")) {install.packages("knitr"); require("knitr")}
+if (!requireNamespace('BiocManager', quietly = TRUE)) {install.packages('BiocManager'); require("BiocManager")}
+if (!require("dplyr")) {install.packages("dplyr"); require("dplyr")}
+if (!require("stringr")) {install.packages("stringr"); require("stringr")}
+if (!require("Seurat")) {install.packages("Seurat"); require("Seurat")}
+if (!require("sctransform")) {install.packages("sctransform"); require("sctransform")}
+if (!require("glmGamPoi")) {BiocManager::install('glmGamPoi'); require("glmGamPoi")}
+if (!require("patchwork")) {install.packages("patchwork"); require("patchwork")}
+if (!require("ggplot2")) {install.packages("ggplot2"); require("ggplot2")}
+if (!require("EnhancedVolcano")) {BiocManager::install('EnhancedVolcano'); require("EnhancedVolcano")}
+if (!require("DESeq2")) {BiocManager::install('DESeq2'); require("DESeq2")}
+if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")}
+if (!require("RColorBrewer")) {install.packages("RColorBrewer"); require("RColorBrewer")}
+if (!require("car")) {install.packages("car"); require("car")}
+if (!require("openxlsx")) {install.packages("openxlsx"); require("openxlsx")}
+if (!require("readxl")) {install.packages("readxl"); require("readxl")}
+if (!require("ggrepel")) {install.packages("ggrepel"); require("ggrepel")}
+if (!require("gghighlight")) {install.packages("gghighlight"); require("gghighlight")}
+if (!require("ggpmisc")) {install.packages("ggpmisc"); require("ggpmisc")}
+if (!require("data.table")) {install.packages("data.table"); require("data.table")}
+if (!require("here")) {install.packages("here"); require("here")}
+if (!require("clusterProfiler")) {BiocManager::install('clusterProfiler'); require("clusterProfiler")}
+if (!require("enrichplot")) {BiocManager::install('enrichplot'); require("enrichplot")}
+if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")} # for data frame transformation
+if (!require("gplots")) {install.packages("gplots"); require("gplots")}
+if (!require("ggvenn")) {install.packages("ggvenn"); require("ggvenn")}
+if (!require("ggrepel")) {install.packages("ggrepel"); require("ggrepel")}
+
+library("EnhancedVolcano")
+library(UpSetR)
+library(ComplexHeatmap)
+#install.packages("ggtext")
+library(ggtext)
+
+
+
+options(future.globals.maxSize = 74 * 1024^3) # 55 GB
+getOption("future.globals.maxSize") #59055800320
+
+here()
+```
+# Introduction
+
+## Changes based on meeting with Sargis on 4/22/2025
+
+1) Save Alports_Glom_EC.rds file <br>
+2) Change arguments for FindMarkers to `logfc.threshold = 0.1` <br>
+3) Write DEG lists to excel file <br>
+4) Write Pathways list to excel file <br>
+5) Add comparisons of additional groups (WT vs. 6M, 4M vs. 4M_1EV) <br>
+
+## Changes based on meeting with Sargis on 5/28/2025
+
+1) Split glom_EC's by treatment group for split UMAP and Proportion Plot
+
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+SO <- readRDS(file = here("outputs", "Alports_Glom_EC.rds"))
+
+DimPlot(SO, label = T)
+
+```
+
+# FindAllMarkers Heatmap
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+SO <- PrepSCTFindMarkers(SO)
+
+SO.markers <- FindAllMarkers(SO, only.pos = TRUE, min.pct = .25)
+
+SO.markers %>%
+    group_by(cluster) %>%
+    dplyr::filter(avg_log2FC > 1) %>%
+    slice_head(n = 5) %>%
+    ungroup() -> top10
+DoHeatmap(SO, features = top10$gene) + NoLegend()
+
+```
+
+## Rename
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center', results='hide'}
+
+
+SO2 <- SO
+
+SO2@meta.data <- SO2@meta.data %>% 
+  mutate(subclass_EC = dplyr::case_when(
+    seurat_clusters == 0  ~ "Type_A",
+    seurat_clusters == 1  ~ "Type_A",
+    seurat_clusters == 2  ~ "Type_B",
+    seurat_clusters == 3  ~ "Type_B",
+    seurat_clusters == 4  ~ "Type_C",
+    seurat_clusters == 5  ~ "Type_D",
+    seurat_clusters == 6  ~ "Type_Mito",
+    seurat_clusters == 7  ~ "Type_D",
+    seurat_clusters == 8  ~ "Type_E",
+    seurat_clusters == 9  ~ "Type_Prolif"
+  ))
+
+DimPlot(SO2, group.by = "subclass_EC")
+
+```
+
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+t1 <- table(SO2@meta.data$subclass_EC, SO2$group)[, c("WT", "4M_Alp", "4M_Alp_1EV", "4M_Alp_2EV", "6M_Alp")]
+t1
+
+prop.t1 <- prop.table(t1, margin = 2) 
+prop.t1
+
+t2 <- as.data.frame(t1)
+colnames(t2) <- c('Cell_type', 'Group', 'Frequency')
+
+# Original plot
+
+ggplot(t2, aes(fill=Cell_type, y=Frequency, x=Group)) + 
+  geom_bar(position="fill", stat = "identity", fun.y = "mean", colour="black") +
+  theme_classic()
+
+```
+
+## Identifying EC subtypes
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center', fig.width=10}
+
+FeaturePlot(SO2, "Epcam")
+
+FeaturePlot(SO2, "Aqp1")
+
+FeaturePlot(SO2, "mt-Nd2")
+
+VlnPlot(SO2, "percent.mt", group.by = "subclass_EC")
+
+VlnPlot(SO2, "nCount_RNA", group.by = "subclass_EC")
+
+```
+
+## Checking non-EC's
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE, fig.width=10}
+
+Idents(SO2) <- SO2@meta.data$subclass_EC
+
+SO.markers <- FindAllMarkers(SO2, only.pos = TRUE, min.pct = .25)
+
+SO.markers %>%
+    group_by(cluster) %>%
+    dplyr::filter(avg_log2FC > 1) %>%
+    slice_head(n = 5) %>%
+    ungroup() -> top10
+DoHeatmap(SO2, features = top10$gene) + NoLegend()
+
+```
+
+# Session Info
+
+```{r sessioninfo, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+sessionInfo()
+
+```
+

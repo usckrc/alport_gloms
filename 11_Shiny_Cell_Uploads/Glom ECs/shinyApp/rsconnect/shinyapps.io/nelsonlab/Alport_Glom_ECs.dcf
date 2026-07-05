@@ -1,0 +1,12 @@
+name: Alport_Glom_ECs
+title: Alport_Glom_ECs
+username: nelsonlab
+account: nelsonlab
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 16845783
+bundleId: 11681823
+url: https://nelsonlab.shinyapps.io/Alport_Glom_ECs/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE

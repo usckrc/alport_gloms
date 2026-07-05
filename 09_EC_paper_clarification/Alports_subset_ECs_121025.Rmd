@@ -1,0 +1,1712 @@
+---
+title: "Alports Glom EC Analysis"
+author: "Jonathan Nelson"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document: 
+    toc: yes
+    toc_depth: 3
+    toc_float: true
+    number_sections: yes
+    theme: bootstrap
+    df_print: paged
+    code_folding: hide
+    highlight: pygments
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load Packages
+
+```{r load new packages, echo=TRUE, error=FALSE, message=FALSE, warning=FALSE}
+
+if (!require("knitr")) {install.packages("knitr"); require("knitr")}
+if (!requireNamespace('BiocManager', quietly = TRUE)) {install.packages('BiocManager'); require("BiocManager")}
+if (!require("dplyr")) {install.packages("dplyr"); require("dplyr")}
+if (!require("stringr")) {install.packages("stringr"); require("stringr")}
+if (!require("Seurat")) {install.packages("Seurat"); require("Seurat")}
+if (!require("sctransform")) {install.packages("sctransform"); require("sctransform")}
+if (!require("glmGamPoi")) {BiocManager::install('glmGamPoi'); require("glmGamPoi")}
+if (!require("patchwork")) {install.packages("patchwork"); require("patchwork")}
+if (!require("ggplot2")) {install.packages("ggplot2"); require("ggplot2")}
+if (!require("EnhancedVolcano")) {BiocManager::install('EnhancedVolcano'); require("EnhancedVolcano")}
+if (!require("DESeq2")) {BiocManager::install('DESeq2'); require("DESeq2")}
+if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")}
+if (!require("RColorBrewer")) {install.packages("RColorBrewer"); require("RColorBrewer")}
+if (!require("car")) {install.packages("car"); require("car")}
+if (!require("openxlsx")) {install.packages("openxlsx"); require("openxlsx")}
+if (!require("readxl")) {install.packages("readxl"); require("readxl")}
+if (!require("ggrepel")) {install.packages("ggrepel"); require("ggrepel")}
+if (!require("gghighlight")) {install.packages("gghighlight"); require("gghighlight")}
+if (!require("ggpmisc")) {install.packages("ggpmisc"); require("ggpmisc")}
+if (!require("data.table")) {install.packages("data.table"); require("data.table")}
+if (!require("here")) {install.packages("here"); require("here")}
+if (!require("clusterProfiler")) {BiocManager::install('clusterProfiler'); require("clusterProfiler")}
+if (!require("enrichplot")) {BiocManager::install('enrichplot'); require("enrichplot")}
+if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")} # for data frame transformation
+if (!require("gplots")) {install.packages("gplots"); require("gplots")}
+if (!require("ggvenn")) {install.packages("ggvenn"); require("ggvenn")}
+if (!require("ggrepel")) {install.packages("ggrepel"); require("ggrepel")}
+if (!require("clusterProfiler")) {BiocManager::install('clusterProfiler'); require("clusterProfiler")}
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("org.Mm.eg.db")
+
+
+library("EnhancedVolcano")
+library(UpSetR)
+library(ComplexHeatmap)
+#install.packages("ggtext")
+library(ggtext)
+library(kableExtra) 
+
+
+options(future.globals.maxSize = 74 * 1024^3) # 55 GB
+getOption("future.globals.maxSize") #59055800320
+
+here()
+```
+
+# Introduction
+
+## Email from Sargis on 11/3/2025
+
+Q1: The color codes assigned to GEC subtypes in the heatmap do not match those used in the bar graphs showing subtype frequences. I was able to classify the subtypes based on the top 5 markers in the heatmap but was not able to compare between the groups due to this issue. 
+
+Q2: EC subtype classification: Please, let me know what you think about it. 
+
+Q3: Could you please help me identify the genes in these Venn diagrams, (also including the comparison between 1EV/AS vs 4M/WT) especially those overlapping. I tried to extract them from the excel files using different cut offs, but I kept getting different numbers than yours. Could not figure out why. And then it would be interesting to do pathway analysis (or GO analysis) on these sets of genes for each Venn diagram. 
+
+Q4: Would it be possible to have a pseudobulk PCA analysis of the groups? like for examples WT, 4M, 1EV and 2EV in one PCA plot, and separately WT, 4M AS and 6m AS in a different PCA plot?
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+SO <- readRDS(file = here("outputs", "Alports_Glom_EC.rds"))
+
+# DimPlot(SO, label = T)
+
+```
+# Q1
+
+### Creating a Consistent Color Palette v1
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+library(scales)   # ggplot2 depends on this
+
+# ggplot2 default discrete palette (6 colors)
+my_colors <- scales::hue_pal()(7)
+
+# my_colors
+
+type_levels <- c(
+  "Type_A",
+  "Type_B",
+  "Type_C",
+  "Type_D",
+  "Type_E",
+  "Type_Mito",
+  "Type_Prolif"
+)
+
+names(my_colors) <- type_levels
+#my_colors
+
+```
+
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+SO <- PrepSCTFindMarkers(SO)
+
+SO.markers <- FindAllMarkers(SO, only.pos = TRUE, min.pct = .25)
+
+SO.markers %>%
+    group_by(cluster) %>%
+    dplyr::filter(avg_log2FC > 1) %>%
+    slice_head(n = 5) %>%
+    ungroup() -> top10
+
+# DoHeatmap(SO, features = top10$gene) + NoLegend()
+
+```
+
+## Rename v1
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center', results='hide'}
+
+
+SO2 <- SO
+
+SO2@meta.data <- SO2@meta.data %>% 
+  mutate(subclass_EC = dplyr::case_when(
+    seurat_clusters == 0  ~ "Type_A",
+    seurat_clusters == 1  ~ "Type_A",
+    seurat_clusters == 2  ~ "Type_B",
+    seurat_clusters == 3  ~ "Type_B",
+    seurat_clusters == 4  ~ "Type_C",
+    seurat_clusters == 5  ~ "Type_D",
+    seurat_clusters == 6  ~ "Type_Mito",
+    seurat_clusters == 7  ~ "Type_D",
+    seurat_clusters == 8  ~ "Type_E",
+    seurat_clusters == 9  ~ "Type_Prolif"
+  ))
+
+SO2@meta.data$subclass_EC <- factor(
+  SO2@meta.data$subclass_EC,
+  levels = c(
+    "Type_A",
+    "Type_B",
+    "Type_C",
+    "Type_D",
+    "Type_E",
+    "Type_Mito",
+    "Type_Prolif"
+  )
+)
+```
+
+### Creating a Consistent Color Palette v1
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+library(scales)   # ggplot2 depends on this
+
+# ggplot2 default discrete palette (6 colors)
+my_colors <- scales::hue_pal()(7)
+
+# my_colors
+
+type_levels <- c(
+  "Type_A",
+  "Type_B",
+  "Type_C",
+  "Type_D",
+  "Type_E",
+  "Type_Mito",
+  "Type_Prolif"
+)
+
+names(my_colors) <- type_levels
+#my_colors
+
+```
+
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+DimPlot(SO2, group.by = "subclass_EC",) + scale_color_manual(values = my_colors)
+
+```
+
+## Rename v2
+
+### Creating a Consistent Color Palette v2
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+library(scales)   # ggplot2 depends on this
+
+# ggplot2 default discrete palette (6 colors)
+my_colors2 <- scales::hue_pal()(7)
+
+# my_colors
+
+type_levels <- c(
+  "Type_1",
+  "Type_2",
+  "Type_3",
+  "Type_4",
+  "Type_5",
+  "Type_6",
+  "Type_7"
+)
+
+names(my_colors2) <- type_levels
+my_colors2
+
+```
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center', results='hide'}
+
+SO2@meta.data <- SO2@meta.data %>% 
+  mutate(subclass_EC_2 = dplyr::case_when(
+    subclass_EC == "Type_A"  ~ "Type_1",
+    subclass_EC == "Type_B"  ~ "Type_2",
+    subclass_EC == "Type_C"  ~ "Type_4",
+    subclass_EC == "Type_D"  ~ "Type_3",
+    subclass_EC == "Type_E" ~ "Type_6",
+    subclass_EC == "Type_Mito"  ~ "Type_5",
+    subclass_EC == "Type_Prolif"  ~ "Type_7"
+  ))
+
+SO2@meta.data$subclass_EC_2 <- factor(
+  SO2@meta.data$subclass_EC_2,
+  levels = c(
+    "Type_1",
+    "Type_2",
+    "Type_3",
+    "Type_4",
+    "Type_5",
+    "Type_6",
+    "Type_7"
+  )
+)
+
+DimPlot(SO2, group.by = "subclass_EC_2") + scale_color_manual(values = my_colors2)
+
+```
+
+## Table of EC Cell Type Identities
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE, fig.width=10}
+
+cell_data <- data.frame(
+  Cluster = c("Type_1", "Type_3", "Type_4", "Type_5", "Type_2", "Type_6", "Type_7"),
+  Markers = c(
+    "Csrnp1, Nfkbiz, Ppp1r10, Socs1, Dusp5",
+    "Slc6a6, Pltp, Atp13a3, Aqp1, Slc26a10",
+    "Slc45a4, Gja5, Esm1, Cxcr4, Hey1",
+    "mt-Nd5, mt-Nd4, mt-Nd3, mt-Nd2, mt-Nd4l",
+    "Ddnrb, Fabp4, Gda, Akap12, Pde7b",
+    "Dlk1, Rtl1, Sez6l2, Egln3",
+    "Uhrf1, Gins2, Mki67, Fignl1, Rad51"
+  ),
+  Cell_State = c(
+    "Immune-regulatory",
+    "Transport-focused",
+    "Angiogenic",
+    "Mitochondrial-rich",
+    "Lipid, structural maintenance, quiescent",
+    "Developmental",
+    "Proliferative"
+  ),
+  stringsAsFactors = FALSE
+)
+
+# Reorder numerically by the number after "Type_"
+cell_data <- cell_data %>%
+  mutate(type_num = as.numeric(str_extract(Cluster, "\\d+"))) %>%
+  arrange(type_num) %>%
+  select(-type_num)  # remove helper column
+
+# Render table with kable
+kable(cell_data, "html", align = c("c","c","c"), caption = "<b><span style='font-size:16pt'>Cell Clusters with Marker Genes and Cell States</span></b>") %>%
+  kable_styling(full_width = FALSE, position = "center") %>%
+  row_spec(0, bold = TRUE, color = "black") # bold header
+
+```
+
+## Heatmap
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE, fig.width=12}
+
+Idents(SO2) <- SO2@meta.data$subclass_EC_2
+
+SO.markers <- FindAllMarkers(SO2, only.pos = TRUE, min.pct = .25)
+
+SO.markers %>%
+    group_by(cluster) %>%
+    dplyr::filter(avg_log2FC > 1) %>%
+    slice_head(n = 5) %>%
+    ungroup() -> top10
+
+DoHeatmap(SO2, features = top10$gene) + NoLegend() +
+  theme(plot.margin = margin(20, 80, 10, 10))
+
+```
+
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+t1 <- table(SO2@meta.data$subclass_EC_2, SO2$group)[, c("WT", "4M_Alp", "4M_Alp_1EV", "4M_Alp_2EV", "6M_Alp")]
+#t1
+
+prop.t1 <- prop.table(t1, margin = 2) 
+#prop.t1
+
+t2 <- as.data.frame(t1)
+colnames(t2) <- c('Cell_type', 'Group', 'Frequency')
+
+# Original plot
+
+ggplot(t2, aes(fill=Cell_type, y=Frequency, x=Group)) + 
+  geom_bar(position="fill", stat = "identity", fun.y = "mean", colour="black") +
+  scale_fill_manual(values = my_colors2) +
+  theme_classic()
+
+```
+
+# Q2
+
+Seems good to me and see above for changing the names of the EC clusters and creating a consistnent color palette. 
+
+# Q3
+
+## The Problem
+
+Part of the problem you were facing in trying to **compare the Venn Diagrams and the CSV DEG lists** were created in different ways and from different files at different points in the analysis. 
+
+DEG lists:
+
+From **Alports_Quantify_Number_of_DEGs_WTv4M_Alp_1EV_09182025**
+
+Using **SCT** assay and **Seurat_5.3.0**
+
+for (i in clusters) {
+DefaultAssay(SO) <- "SCT"
+DEGs <- FindMarkers(SO, ident.1 = "4M_Alp_1EV", ident.2 = "WT", group.by = "group" , subset.ident = i, logfc.threshold = .1, min.pct = .1)
+DEGs <- DEGs %>% rownames_to_column("gene") %>% filter(p_val_adj < .05)
+DEGs <- DEGs[order(DEGs[,"avg_log2FC"], decreasing = TRUE),]
+assign(paste0("Alports_4M_",names(clusters[i])), DEGs, envir = DEG.env)
+
+Venn Diagram: **Alports_subset_ECs_Quantify_Reversal_Genes_0528202**
+
+I think using **RNA** assay and **Seurat_4.4.0**
+
+df1 <- FindMarkers(SO_EC_Clean, ident.1 = Condition_A, ident.2 = Condition_Baseline, group.by = "group", subset.ident = "EC_glom", logfc.threshold = 0.1, min.pct = 0.1)
+
+## The Solution
+
+Start with the DEG lists from **Alports_Quantify_Number_of_DEGs_WTv4M_Alp_1EV_09182025** and create Venn Diagrams and new intersection lists to perform Pathways Analysis.
+
+## Update: **Solution Didn't work**
+
+### The Previous DEG lists aren't the correct comparisons for making the Venn Diagrams
+### They were really setup to look at all the different populations...not just ECs
+
+### Solution #2
+
+Recreate the DEG lists again from the **Alports_Glom_EC.rds** dataset and save them as csv files as well. 
+
+### Re-create DEG Lists
+
+df1 <- FindMarkers(SO_EC_Clean, ident.1 = Condition_A, ident.2 = Condition_Baseline, group.by = "group", subset.ident = "EC_glom", logfc.threshold = 0.1, min.pct = 0.1)
+
+df2 <- FindMarkers(SO_EC_Clean, ident.1 = Condition_B, ident.2 = Condition_A, group.by = "group", subset.ident = "EC_glom", logfc.threshold = 0.1, min.pct = 0.1)
+
+df3 <- FindMarkers(SO_EC_Clean, ident.1 = Condition_C, ident.2 = Condition_A, group.by = "group", subset.ident = "EC_glom", logfc.threshold = 0.1, min.pct = 0.1)
+
+df4 <- FindMarkers(SO_EC_Clean, ident.1 = Condition_D, ident.2 = Condition_A, group.by = "group", subset.ident = "EC_glom", logfc.threshold = 0.1, min.pct = 0.1)
+
+#### DEG Setup
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+Condition_Baseline <- "WT"
+
+Condition_A <- "4M_Alp"
+  
+Condition_B <- "4M_Alp_1EV"
+
+Condition_C <- "4M_Alp_2EV"
+
+Condition_D <- "6M_Alp"
+
+clusters <- unique(SO2@meta.data$class_merge)
+names(clusters) <- clusters
+
+SO <- PrepSCTFindMarkers(SO2)
+DEG.env <- new.env()
+
+Idents(SO2) <- SO2@meta.data$group
+
+DefaultAssay(SO2) <- "SCT"
+
+```
+
+#### df1
+
+4M_Alp vs. WT
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+DEGs <- FindMarkers(SO2, ident.1 = Condition_A, ident.2 = Condition_Baseline, logfc.threshold = .1, min.pct = .1)
+DEGs <- DEGs %>% rownames_to_column("gene") %>% filter(p_val_adj < .05)
+DEGs <- DEGs[order(DEGs[,"avg_log2FC"], decreasing = TRUE),]
+
+#remove the first column of from the dataframe DEGs
+DEGs <- rownames_to_column(DEGs)
+DEGs <- DEGs[,-1]
+
+df <- head(DEGs, 20)
+
+df
+
+df1 <- DEGs
+
+
+```
+
+#### df2
+
+4M_Alp_1EV vs. 4M_Alp
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+DEGs <- FindMarkers(SO2, ident.1 = Condition_B, ident.2 = Condition_A, logfc.threshold = .1, min.pct = .1)
+DEGs <- DEGs %>% rownames_to_column("gene") %>% filter(p_val_adj < .05)
+DEGs <- DEGs[order(DEGs[,"avg_log2FC"], decreasing = TRUE),]
+
+#remove the first column of from the dataframe DEGs
+DEGs <- rownames_to_column(DEGs)
+DEGs <- DEGs[,-1]
+
+df <- head(DEGs, 20)
+
+df
+
+df2 <- DEGs
+
+
+```
+
+#### df3
+
+4M_Alp_2EV vs. 4M_Alp
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+DEGs <- FindMarkers(SO2, ident.1 = Condition_C, ident.2 = Condition_A, logfc.threshold = .1, min.pct = .1)
+DEGs <- DEGs %>% rownames_to_column("gene") %>% filter(p_val_adj < .05)
+DEGs <- DEGs[order(DEGs[,"avg_log2FC"], decreasing = TRUE),]
+
+#remove the first column of from the dataframe DEGs
+DEGs <- rownames_to_column(DEGs)
+DEGs <- DEGs[,-1]
+
+df <- head(DEGs, 20)
+
+df
+
+df3 <- DEGs
+
+```
+
+#### df4
+
+6M_Alp vs. WT
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+DEGs <- FindMarkers(SO2, ident.1 = Condition_D, ident.2 = Condition_Baseline, logfc.threshold = .1, min.pct = .1)
+DEGs <- DEGs %>% rownames_to_column("gene") %>% filter(p_val_adj < .05)
+DEGs <- DEGs[order(DEGs[,"avg_log2FC"], decreasing = TRUE),]
+
+#remove the first column of from the dataframe DEGs
+DEGs <- rownames_to_column(DEGs)
+DEGs <- DEGs[,-1]
+
+df <- head(DEGs, 20)
+
+df
+
+df4 <- DEGs
+
+```
+
+#### Write Spreadsheet of DEG Lits
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+# Create workbook
+wb <- createWorkbook()
+
+# Add sheets + write data
+addWorksheet(wb, "df1 - 4M_Alp vs. WT")
+writeData(wb, "df1 - 4M_Alp vs. WT", df1)
+
+addWorksheet(wb, "df2 - 4M_Alp_1EV vs. 4M_Alp")
+writeData(wb, "df2 - 4M_Alp_1EV vs. 4M_Alp", df2)
+
+addWorksheet(wb, "df3 - 4M_Alp_2EV vs. 4M_Alp")
+writeData(wb, "df3 - 4M_Alp_2EV vs. 4M_Alp", df3)
+
+addWorksheet(wb, "df4 - 6M_Alp vs. 4M_Alp")
+writeData(wb, "df4 - 6M_Alp vs. 4M_Alp", df4)
+
+# Save workbook
+saveWorkbook(wb, "compiled_DEG_lists.xlsx", overwrite = TRUE)
+
+```
+
+#### Filter and Split Positive and Negative Lists
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+df_summary <- tibble(
+  dataframe = c("df1", "df2", "df3", "df4"),
+  nrows = c(nrow(df1), nrow(df2), nrow(df3), nrow(df4))
+)
+
+# Plot
+ggplot(df_summary, aes(x = dataframe, y = nrows, fill = dataframe)) +
+  geom_col() +
+  labs(
+    title = "Number of DEGs",
+    x = "Dataframe",
+    y = "Number of DEGs"
+  ) +
+  theme_classic() +
+  theme(legend.position = "none")
+
+```
+
+
+#### Filter and Split Positive and Negative Lists
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+df1_pos <- df1 %>% filter(avg_log2FC > 0) %>% filter(p_val_adj < 0.05) %>% filter(avg_log2FC > .25) %>% arrange(desc(abs(avg_log2FC)))
+
+df1_pos
+
+df1_neg <- df1 %>% filter(avg_log2FC < 0) %>% filter(p_val_adj < 0.05) %>% filter(avg_log2FC < -.25) %>% arrange(desc(abs(avg_log2FC)))
+
+df1_neg
+
+df2_pos <- df2 %>% filter(avg_log2FC > 0) %>% filter(p_val_adj < 0.05) %>% filter(avg_log2FC > .25) %>% arrange(desc(abs(avg_log2FC)))
+
+df2_pos
+
+df2_neg <- df2 %>% filter(avg_log2FC < 0) %>% filter(p_val_adj < 0.05) %>% filter(avg_log2FC < -.25) %>% arrange(desc(abs(avg_log2FC)))
+
+df2_neg
+
+df3_pos <- df3 %>% filter(avg_log2FC > 0) %>% filter(p_val_adj < 0.05) %>% filter(avg_log2FC > .25) %>% arrange(desc(abs(avg_log2FC)))
+
+df3_pos
+
+df3_neg <- df3 %>% filter(avg_log2FC < 0) %>% filter(p_val_adj < 0.05) %>% filter(avg_log2FC < -.25) %>% arrange(desc(abs(avg_log2FC)))
+
+df3_neg
+
+df4_pos <- df4 %>% filter(avg_log2FC > 0) %>% filter(p_val_adj < 0.05) %>% filter(avg_log2FC > .25) %>% arrange(desc(abs(avg_log2FC)))
+
+df4_pos
+
+df4_neg <- df4 %>% filter(avg_log2FC < 0) %>% filter(p_val_adj < 0.05) %>% filter(avg_log2FC < -.25) %>% arrange(desc(abs(avg_log2FC)))
+
+df4_neg
+
+# List only the pos/neg data frames
+dfs <- list(
+  df1_pos = df1_pos,
+  df1_neg = df1_neg,
+  df2_pos = df2_pos,
+  df2_neg = df2_neg,
+  df3_pos = df3_pos,
+  df3_neg = df3_neg,
+  df4_pos = df4_pos,
+  df4_neg = df4_neg
+)
+
+# Create summary table
+df_summary <- tibble(
+  dataframe = names(dfs),
+  nrows = sapply(dfs, nrow),
+  group = sub("_(pos|neg)$", "", names(dfs)),  # extract df1, df2, df3, df4
+  type = sub("^df[0-9]+_", "", names(dfs))     # extract pos / neg
+)
+
+# Plot grouped bars
+ggplot(df_summary, aes(x = group, y = nrows, fill = type)) +
+  geom_col(position = "dodge") +
+  labs(
+    title = "Number of DEGs",
+    x = "Dataframe",
+    y = "DEGs",
+    fill = "Subset"
+  ) +
+  theme_classic()
+
+```
+
+## Venn Diagram Readout
+
+### Up -> Down
+
+#### 4M vs 4M_1EV
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+set1 <- df1_pos$gene
+set2 <- df2_neg$gene
+venn <- ggvenn(list('Up in 4M' = set1, 'Down in 1EV' = set2))
+print(venn)
+
+lst <- list(set1, set2)
+ItemsList <- venn(lst, show.plot = FALSE)
+
+test <- attributes(ItemsList)$intersections
+
+genelist_4M_Alp_1EV <- test$'A:B'
+
+# Find the maximum length
+max_len <- max(length(test$A), length(test$B), length(test$`A:B`))
+
+# Pad each vector to the same length
+A_col  <- c(test$A,  rep(NA, max_len - length(test$A)))
+B_col  <- c(test$B,  rep(NA, max_len - length(test$B)))
+AB_col <- c(test$`A:B`, rep(NA, max_len - length(test$`A:B`)))
+
+# Create a new dataframe
+venn_df <- data.frame(
+  'Up_in_4M' = A_col,
+  'Down_in_1EV' = B_col,
+  'Intersection' = AB_col,
+  stringsAsFactors = FALSE
+)
+
+# Create workbook
+wb <- createWorkbook()
+
+# Add a worksheet
+addWorksheet(wb, "venn_df")
+
+# Write the data
+writeData(wb, "venn_df", venn_df)
+
+# Save the Excel file
+saveWorkbook(wb, "venn_gene_lists_4M_UP_and_4M1EV_DOWN.xlsx", overwrite = TRUE)
+
+```
+
+#### Pathways
+
+##### Up_in_4M
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+ENTREZ_list <- bitr(geneID = A_col,   #input gene id
+                    fromType = "SYMBOL",           #input id type
+                    toType = "ENTREZID",           #output id type
+                    OrgDb = "org.Mm.eg.db"         #annotation Db
+                    )
+
+go <- enrichGO(gene = ENTREZ_list$ENTREZID,           #a vector of entrez gene id
+                   OrgDb = "org.Mm.eg.db",    
+                   ont = "BP",
+                   readable = TRUE)              #whether mapping gene ID to gene Name
+go
+
+dotplot(go) +
+    ggtitle("") +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    theme_classic() + 
+    scale_x_reverse()  # Reverses the x-axis
+
+df_pathways <- go@result
+
+write.xlsx(df_pathways, file = "pathways_venn_gene_lists_4M_UP_and_4M1EV_DOWN_x_Up_in_4M.xlsx")
+
+```
+
+##### Down_in_1EV
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+ENTREZ_list <- bitr(geneID = B_col,   #input gene id
+                    fromType = "SYMBOL",           #input id type
+                    toType = "ENTREZID",           #output id type
+                    OrgDb = "org.Mm.eg.db"         #annotation Db
+                    )
+
+go <- enrichGO(gene = ENTREZ_list$ENTREZID,           #a vector of entrez gene id
+                   OrgDb = "org.Mm.eg.db",    
+                   ont = "BP",
+                   readable = TRUE)              #whether mapping gene ID to gene Name
+go
+
+dotplot(go) +
+    ggtitle("") +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    theme_classic() + 
+    scale_x_reverse()  # Reverses the x-axis
+
+df_pathways <- go@result
+
+write.xlsx(df_pathways, file = "pathways_venn_gene_lists_4M_UP_and_4M1EV_DOWN_x_Down_in_1EV.xlsx")
+
+```
+
+##### INTERSECTION
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+ENTREZ_list <- bitr(geneID = AB_col,   #input gene id
+                    fromType = "SYMBOL",           #input id type
+                    toType = "ENTREZID",           #output id type
+                    OrgDb = "org.Mm.eg.db"         #annotation Db
+                    )
+
+go <- enrichGO(gene = ENTREZ_list$ENTREZID,           #a vector of entrez gene id
+                   OrgDb = "org.Mm.eg.db",    
+                   ont = "BP",
+                   readable = TRUE)              #whether mapping gene ID to gene Name
+go
+
+dotplot(go) +
+    ggtitle("") +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    theme_classic() + 
+    scale_x_reverse()  # Reverses the x-axis
+
+df_pathways <- go@result
+
+write.xlsx(df_pathways, file = "pathways_venn_gene_lists_4M_UP_and_4M1EV_DOWN_x_INTERSECTION.xlsx")
+
+```
+
+#### 4M vs 4M_2EV
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+set1 <- df1_pos$gene
+set2 <- df3_neg$gene
+venn <- ggvenn(list('Up in 4M' = set1, 'Down in 2EV' = set2))
+print(venn)
+
+lst <- list(set1, set2)
+ItemsList <- venn(lst, show.plot = FALSE)
+
+test <- attributes(ItemsList)$intersections
+
+genelist_4M_Alp_2EV <- test$'A:B'
+
+# Find the maximum length
+max_len <- max(length(test$A), length(test$B), length(test$`A:B`))
+
+# Pad each vector to the same length
+A_col  <- c(test$A,  rep(NA, max_len - length(test$A)))
+B_col  <- c(test$B,  rep(NA, max_len - length(test$B)))
+AB_col <- c(test$`A:B`, rep(NA, max_len - length(test$`A:B`)))
+
+# Create a new dataframe
+venn_df <- data.frame(
+  'Up_in_4M' = A_col,
+  'Down_in_2EV' = B_col,
+  'Intersection' = AB_col,
+  stringsAsFactors = FALSE
+)
+
+# Create workbook
+wb <- createWorkbook()
+
+# Add a worksheet
+addWorksheet(wb, "venn_df")
+
+# Write the data
+writeData(wb, "venn_df", venn_df)
+
+# Save the Excel file
+saveWorkbook(wb, "venn_gene_lists_4M_UP_and_4M2EV_DOWN.xlsx", overwrite = TRUE)
+
+```
+
+#### Pathways
+
+##### Up_in_4M
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+ENTREZ_list <- bitr(geneID = A_col,   #input gene id
+                    fromType = "SYMBOL",           #input id type
+                    toType = "ENTREZID",           #output id type
+                    OrgDb = "org.Mm.eg.db"         #annotation Db
+                    )
+
+go <- enrichGO(gene = ENTREZ_list$ENTREZID,           #a vector of entrez gene id
+                   OrgDb = "org.Mm.eg.db",    
+                   ont = "BP",
+                   readable = TRUE)              #whether mapping gene ID to gene Name
+go
+
+dotplot(go) +
+    ggtitle("") +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    theme_classic() + 
+    scale_x_reverse()  # Reverses the x-axis
+
+df_pathways <- go@result
+
+write.xlsx(df_pathways, file = "pathways_venn_gene_lists_4M_UP_and_4M2EV_DOWN_x_Up_in_4M.xlsx")
+
+```
+
+##### Down_in_2EV
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+ENTREZ_list <- bitr(geneID = B_col,   #input gene id
+                    fromType = "SYMBOL",           #input id type
+                    toType = "ENTREZID",           #output id type
+                    OrgDb = "org.Mm.eg.db"         #annotation Db
+                    )
+
+go <- enrichGO(gene = ENTREZ_list$ENTREZID,           #a vector of entrez gene id
+                   OrgDb = "org.Mm.eg.db",    
+                   ont = "BP",
+                   readable = TRUE)              #whether mapping gene ID to gene Name
+go
+
+dotplot(go) +
+    ggtitle("") +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    theme_classic() + 
+    scale_x_reverse()  # Reverses the x-axis
+
+df_pathways <- go@result
+
+write.xlsx(df_pathways, file = "pathways_venn_gene_lists_4M_UP_and_4M2EV_DOWN_x_Down_in_2EV.xlsx")
+
+```
+
+##### INTERSECTION
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+ENTREZ_list <- bitr(geneID = AB_col,   #input gene id
+                    fromType = "SYMBOL",           #input id type
+                    toType = "ENTREZID",           #output id type
+                    OrgDb = "org.Mm.eg.db"         #annotation Db
+                    )
+
+go <- enrichGO(gene = ENTREZ_list$ENTREZID,           #a vector of entrez gene id
+                   OrgDb = "org.Mm.eg.db",    
+                   ont = "BP",
+                   readable = TRUE)              #whether mapping gene ID to gene Name
+go
+
+dotplot(go) +
+    ggtitle("") +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    theme_classic() + 
+    scale_x_reverse()  # Reverses the x-axis
+
+df_pathways <- go@result
+
+write.xlsx(df_pathways, file = "pathways_venn_gene_lists_4M_UP_and_4M2EV_DOWN_x_INTERSECTION.xlsx")
+
+```
+
+
+#### 4M vs 6M
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+set1 <- df1_pos$gene
+set2 <- df4_neg$gene
+venn <- ggvenn(list('Up in 4M' = set1, 'Down in 6M' = set2))
+print(venn)
+
+lst <- list(set1, set2)
+ItemsList <- venn(lst, show.plot = FALSE)
+
+test <- attributes(ItemsList)$intersections
+
+genelist_6M_Alp <- test$'A:B'
+
+# Find the maximum length
+max_len <- max(length(test$A), length(test$B), length(test$`A:B`))
+
+# Pad each vector to the same length
+A_col  <- c(test$A,  rep(NA, max_len - length(test$A)))
+B_col  <- c(test$B,  rep(NA, max_len - length(test$B)))
+AB_col <- c(test$`A:B`, rep(NA, max_len - length(test$`A:B`)))
+
+# Create a new dataframe
+venn_df <- data.frame(
+  'Up_in_4M' = A_col,
+  'Down in 6M' = B_col,
+  'Intersection' = AB_col,
+  stringsAsFactors = FALSE
+)
+
+# Create workbook
+wb <- createWorkbook()
+
+# Add a worksheet
+addWorksheet(wb, "venn_df")
+
+# Write the data
+writeData(wb, "venn_df", venn_df)
+
+# Save the Excel file
+saveWorkbook(wb, "venn_gene_lists_4M_UP_and_6M_DOWN.xlsx", overwrite = TRUE)
+
+```
+
+#### Pathways
+
+##### Up_in_4M
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+ENTREZ_list <- bitr(geneID = A_col,   #input gene id
+                    fromType = "SYMBOL",           #input id type
+                    toType = "ENTREZID",           #output id type
+                    OrgDb = "org.Mm.eg.db"         #annotation Db
+                    )
+
+go <- enrichGO(gene = ENTREZ_list$ENTREZID,           #a vector of entrez gene id
+                   OrgDb = "org.Mm.eg.db",    
+                   ont = "BP",
+                   readable = TRUE)              #whether mapping gene ID to gene Name
+go
+
+dotplot(go) +
+    ggtitle("") +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    theme_classic() + 
+    scale_x_reverse()  # Reverses the x-axis
+
+df_pathways <- go@result
+
+write.xlsx(df_pathways, file = "pathways_venn_gene_lists_4M_UP_and_6M_DOWN_x_Up_in_4M.xlsx")
+
+```
+
+##### Down_in_6M
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+ENTREZ_list <- bitr(geneID = B_col,   #input gene id
+                    fromType = "SYMBOL",           #input id type
+                    toType = "ENTREZID",           #output id type
+                    OrgDb = "org.Mm.eg.db"         #annotation Db
+                    )
+
+go <- enrichGO(gene = ENTREZ_list$ENTREZID,           #a vector of entrez gene id
+                   OrgDb = "org.Mm.eg.db",    
+                   ont = "BP",
+                   readable = TRUE)              #whether mapping gene ID to gene Name
+go
+
+dotplot(go) +
+    ggtitle("") +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    theme_classic() + 
+    scale_x_reverse()  # Reverses the x-axis
+
+df_pathways <- go@result
+
+write.xlsx(df_pathways, file = "pathways_venn_gene_lists_4M_UP_and_6M_DOWN_x_Down_in_6M.xlsx")
+
+```
+
+##### INTERSECTION
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+ENTREZ_list <- bitr(geneID = AB_col,   #input gene id
+                    fromType = "SYMBOL",           #input id type
+                    toType = "ENTREZID",           #output id type
+                    OrgDb = "org.Mm.eg.db"         #annotation Db
+                    )
+
+go <- enrichGO(gene = ENTREZ_list$ENTREZID,           #a vector of entrez gene id
+                   OrgDb = "org.Mm.eg.db",    
+                   ont = "BP",
+                   readable = TRUE)              #whether mapping gene ID to gene Name
+go
+
+dotplot(go) +
+    ggtitle("") +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    theme_classic() + 
+    scale_x_reverse()  # Reverses the x-axis
+
+df_pathways <- go@result
+
+write.xlsx(df_pathways, file = "pathways_venn_gene_lists_4M_UP_and_6M_DOWN_x_INTERSECTION.xlsx")
+
+```
+
+
+### Down -> Up
+
+#### 4M vs 4M_1EV
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+set1 <- df1_neg$gene
+set2 <- df2_pos$gene
+venn <- ggvenn(list('Down in 4M' = set1, 'Up in 1EV' = set2))
+print(venn)
+
+lst <- list(set1, set2)
+ItemsList <- venn(lst, show.plot = FALSE)
+
+test <- attributes(ItemsList)$intersections
+
+genelist_4M_Alp_1EV <- test$'A:B'
+
+# Find the maximum length
+max_len <- max(length(test$A), length(test$B), length(test$`A:B`))
+
+# Pad each vector to the same length
+A_col  <- c(test$A,  rep(NA, max_len - length(test$A)))
+B_col  <- c(test$B,  rep(NA, max_len - length(test$B)))
+AB_col <- c(test$`A:B`, rep(NA, max_len - length(test$`A:B`)))
+
+# Create a new dataframe
+venn_df <- data.frame(
+  'Down in 4M' = A_col,
+  'Up in 1EV' = B_col,
+  'Intersection' = AB_col,
+  stringsAsFactors = FALSE
+)
+
+# Create workbook
+wb <- createWorkbook()
+
+# Add a worksheet
+addWorksheet(wb, "venn_df")
+
+# Write the data
+writeData(wb, "venn_df", venn_df)
+
+# Save the Excel file
+saveWorkbook(wb, "venn_gene_lists_4M_DOWN_and_4M1EV_UP.xlsx", overwrite = TRUE)
+
+```
+
+#### Pathways
+
+##### Down_in_4M
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+ENTREZ_list <- bitr(geneID = A_col,   #input gene id
+                    fromType = "SYMBOL",           #input id type
+                    toType = "ENTREZID",           #output id type
+                    OrgDb = "org.Mm.eg.db"         #annotation Db
+                    )
+
+go <- enrichGO(gene = ENTREZ_list$ENTREZID,           #a vector of entrez gene id
+                   OrgDb = "org.Mm.eg.db",    
+                   ont = "BP",
+                   readable = TRUE)              #whether mapping gene ID to gene Name
+go
+
+dotplot(go) +
+    ggtitle("") +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    theme_classic() + 
+    scale_x_reverse()  # Reverses the x-axis
+
+df_pathways <- go@result
+
+write.xlsx(df_pathways, file = "pathways_venn_gene_lists_4M_DOWN_and_4M1EV_UP_x_Down_in_4M.xlsx")
+
+```
+
+##### Up_in_6M
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+ENTREZ_list <- bitr(geneID = B_col,   #input gene id
+                    fromType = "SYMBOL",           #input id type
+                    toType = "ENTREZID",           #output id type
+                    OrgDb = "org.Mm.eg.db"         #annotation Db
+                    )
+
+go <- enrichGO(gene = ENTREZ_list$ENTREZID,           #a vector of entrez gene id
+                   OrgDb = "org.Mm.eg.db",    
+                   ont = "BP",
+                   readable = TRUE)              #whether mapping gene ID to gene Name
+go
+
+dotplot(go) +
+    ggtitle("") +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    theme_classic() + 
+    scale_x_reverse()  # Reverses the x-axis
+
+df_pathways <- go@result
+
+write.xlsx(df_pathways, file = "pathways_venn_gene_lists_4M_DOWN_and_4M1EV_UP_x_Up_in_1EV.xlsx")
+
+```
+
+##### INTERSECTION
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+ENTREZ_list <- bitr(geneID = AB_col,   #input gene id
+                    fromType = "SYMBOL",           #input id type
+                    toType = "ENTREZID",           #output id type
+                    OrgDb = "org.Mm.eg.db"         #annotation Db
+                    )
+
+go <- enrichGO(gene = ENTREZ_list$ENTREZID,           #a vector of entrez gene id
+                   OrgDb = "org.Mm.eg.db",    
+                   ont = "BP",
+                   readable = TRUE)              #whether mapping gene ID to gene Name
+go
+
+dotplot(go) +
+    ggtitle("") +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    theme_classic() + 
+    scale_x_reverse()  # Reverses the x-axis
+
+df_pathways <- go@result
+
+write.xlsx(df_pathways, file = "pathways_venn_gene_lists_4M_DOWN_and_4M1EV_UP_x_INTERSECTION.xlsx")
+
+```
+
+#### 4M vs 4M_2EV
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+set1 <- df1_neg$gene
+set2 <- df3_pos$gene
+venn <- ggvenn(list('Down in 4M' = set1, 'Up in 2EV' = set2))
+print(venn)
+
+lst <- list(set1, set2)
+ItemsList <- venn(lst, show.plot = FALSE)
+
+test <- attributes(ItemsList)$intersections
+
+genelist_4M_Alp_2EV <- test$'A:B'
+
+# Find the maximum length
+max_len <- max(length(test$A), length(test$B), length(test$`A:B`))
+
+# Pad each vector to the same length
+A_col  <- c(test$A,  rep(NA, max_len - length(test$A)))
+B_col  <- c(test$B,  rep(NA, max_len - length(test$B)))
+AB_col <- c(test$`A:B`, rep(NA, max_len - length(test$`A:B`)))
+
+# Create a new dataframe
+venn_df <- data.frame(
+  'Down in 4M' = A_col,
+  'Up in 2EV' = B_col,
+  'Intersection' = AB_col,
+  stringsAsFactors = FALSE
+)
+
+# Create workbook
+wb <- createWorkbook()
+
+# Add a worksheet
+addWorksheet(wb, "venn_df")
+
+# Write the data
+writeData(wb, "venn_df", venn_df)
+
+# Save the Excel file
+saveWorkbook(wb, "venn_gene_lists_4M_DOWN_and_4M2EV_UP.xlsx", overwrite = TRUE)
+
+```
+
+#### Pathways
+
+##### Down_in_4M
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+ENTREZ_list <- bitr(geneID = A_col,   #input gene id
+                    fromType = "SYMBOL",           #input id type
+                    toType = "ENTREZID",           #output id type
+                    OrgDb = "org.Mm.eg.db"         #annotation Db
+                    )
+
+go <- enrichGO(gene = ENTREZ_list$ENTREZID,           #a vector of entrez gene id
+                   OrgDb = "org.Mm.eg.db",    
+                   ont = "BP",
+                   readable = TRUE)              #whether mapping gene ID to gene Name
+go
+
+dotplot(go) +
+    ggtitle("") +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    theme_classic() + 
+    scale_x_reverse()  # Reverses the x-axis
+
+df_pathways <- go@result
+
+write.xlsx(df_pathways, file = "pathways_venn_gene_lists_4M_DOWN_and_4M2EV_UP_x_Down_in_4M.xlsx")
+
+```
+
+##### Up_in_4M_2EV
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+ENTREZ_list <- bitr(geneID = B_col,   #input gene id
+                    fromType = "SYMBOL",           #input id type
+                    toType = "ENTREZID",           #output id type
+                    OrgDb = "org.Mm.eg.db"         #annotation Db
+                    )
+
+go <- enrichGO(gene = ENTREZ_list$ENTREZID,           #a vector of entrez gene id
+                   OrgDb = "org.Mm.eg.db",    
+                   ont = "BP",
+                   readable = TRUE)              #whether mapping gene ID to gene Name
+go
+
+dotplot(go) +
+    ggtitle("") +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    theme_classic() + 
+    scale_x_reverse()  # Reverses the x-axis
+
+df_pathways <- go@result
+
+write.xlsx(df_pathways, file = "pathways_venn_gene_lists_4M_DOWN_and_4M2EV_UP_x_Up_in_2EV.xlsx")
+
+```
+
+##### INTERSECTION
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+ENTREZ_list <- bitr(geneID = AB_col,   #input gene id
+                    fromType = "SYMBOL",           #input id type
+                    toType = "ENTREZID",           #output id type
+                    OrgDb = "org.Mm.eg.db"         #annotation Db
+                    )
+
+go <- enrichGO(gene = ENTREZ_list$ENTREZID,           #a vector of entrez gene id
+                   OrgDb = "org.Mm.eg.db",    
+                   ont = "BP",
+                   readable = TRUE)              #whether mapping gene ID to gene Name
+go
+
+dotplot(go) +
+    ggtitle("") +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    theme_classic() + 
+    scale_x_reverse()  # Reverses the x-axis
+
+df_pathways <- go@result
+
+write.xlsx(df_pathways, file = "pathways_venn_gene_lists_4M_DOWN_and_4M2EV_UP_x_INTERSECTION.xlsx")
+
+```
+
+#### 4M vs 6M
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+set1 <- df1_neg$gene
+set2 <- df4_pos$gene
+venn <- ggvenn(list('Down in 4M' = set1, 'Up in 6M' = set2))
+print(venn)
+
+lst <- list(set1, set2)
+ItemsList <- venn(lst, show.plot = FALSE)
+
+test <- attributes(ItemsList)$intersections
+
+genelist_6M_Alp <- test$'A:B'
+
+# Find the maximum length
+max_len <- max(length(test$A), length(test$B), length(test$`A:B`))
+
+# Pad each vector to the same length
+A_col  <- c(test$A,  rep(NA, max_len - length(test$A)))
+B_col  <- c(test$B,  rep(NA, max_len - length(test$B)))
+AB_col <- c(test$`A:B`, rep(NA, max_len - length(test$`A:B`)))
+
+# Create a new dataframe
+venn_df <- data.frame(
+  'Down in 4M' = A_col,
+  'Up in 6M' = B_col,
+  'Intersection' = AB_col,
+  stringsAsFactors = FALSE
+)
+
+# Create workbook
+wb <- createWorkbook()
+
+# Add a worksheet
+addWorksheet(wb, "venn_df")
+
+# Write the data
+writeData(wb, "venn_df", venn_df)
+
+# Save the Excel file
+saveWorkbook(wb, "venn_gene_lists_4M_DOWN_and_6M_UP.xlsx", overwrite = TRUE)
+
+```
+
+#### Pathways
+
+##### Down_in_4M
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+ENTREZ_list <- bitr(geneID = A_col,   #input gene id
+                    fromType = "SYMBOL",           #input id type
+                    toType = "ENTREZID",           #output id type
+                    OrgDb = "org.Mm.eg.db"         #annotation Db
+                    )
+
+go <- enrichGO(gene = ENTREZ_list$ENTREZID,           #a vector of entrez gene id
+                   OrgDb = "org.Mm.eg.db",    
+                   ont = "BP",
+                   readable = TRUE)              #whether mapping gene ID to gene Name
+go
+
+dotplot(go) +
+    ggtitle("") +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    theme_classic() + 
+    scale_x_reverse()  # Reverses the x-axis
+
+df_pathways <- go@result
+
+write.xlsx(df_pathways, file = "pathways_venn_gene_lists_4M_DOWN_and_6M_UP_x_Down_in_4M.xlsx")
+
+```
+
+##### Up_in_6M
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+ENTREZ_list <- bitr(geneID = B_col,   #input gene id
+                    fromType = "SYMBOL",           #input id type
+                    toType = "ENTREZID",           #output id type
+                    OrgDb = "org.Mm.eg.db"         #annotation Db
+                    )
+
+go <- enrichGO(gene = ENTREZ_list$ENTREZID,           #a vector of entrez gene id
+                   OrgDb = "org.Mm.eg.db",    
+                   ont = "BP",
+                   readable = TRUE)              #whether mapping gene ID to gene Name
+go
+
+dotplot(go) +
+    ggtitle("") +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    theme_classic() + 
+    scale_x_reverse()  # Reverses the x-axis
+
+df_pathways <- go@result
+
+write.xlsx(df_pathways, file = "pathways_venn_gene_lists_4M_DOWN_and_6M_UP_x_Up_in_6M.xlsx")
+
+```
+
+##### INTERSECTION
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+ENTREZ_list <- bitr(geneID = AB_col,   #input gene id
+                    fromType = "SYMBOL",           #input id type
+                    toType = "ENTREZID",           #output id type
+                    OrgDb = "org.Mm.eg.db"         #annotation Db
+                    )
+
+go <- enrichGO(gene = ENTREZ_list$ENTREZID,           #a vector of entrez gene id
+                   OrgDb = "org.Mm.eg.db",    
+                   ont = "BP",
+                   readable = TRUE)              #whether mapping gene ID to gene Name
+go
+
+dotplot(go) +
+    ggtitle("") +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    theme_classic() + 
+    scale_x_reverse()  # Reverses the x-axis
+
+df_pathways <- go@result
+
+write.xlsx(df_pathways, file = "pathways_venn_gene_lists_4M_DOWN_and_6M_UP_x_INTERSECTION.xlsx")
+
+```
+
+# Q4
+
+## Pseudobulk PCA
+
+### ALL GROUPS
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+# head(SO2@meta.data)
+
+pbo <- AggregateExpression(SO2, 
+                           group.by = "sample",
+                           assays = 'RNA', 
+                           slot = "counts",
+                           return.seurat = FALSE)
+
+pbo <- pbo$RNA
+# pbo[1:5, 1:5]
+colnames(pbo) <- sub("^g", "", colnames(pbo))
+# colnames(pbo)[1:5]
+
+# DimPlot(SO2, group.by = "sample")
+
+metadata <- SO2@meta.data %>%
+  as.data.frame() %>%
+  dplyr::group_by(sample) %>%
+  dplyr::summarise(
+    Alports = names(sort(table(alports), decreasing = TRUE))[1],  # Most common value
+    Batch = names(sort(table(batch), decreasing = TRUE))[1],
+    Group = names(sort(table(group), decreasing = TRUE))[1]
+  ) %>%
+  as.data.frame()
+
+rownames(metadata) <- metadata$sample
+
+# head(metadata)
+
+dds <- DESeqDataSetFromMatrix(countData = round(pbo),
+                              colData = metadata,
+                              design = ~ sample)
+
+rld <- rlog(dds, blind=TRUE)
+
+sample_names <- unique(rld$sample)
+
+```
+
+#### PCA By **Sample**
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+# Plot PCA
+sample<-DESeq2::plotPCA(rld, ntop = 1000, intgroup = "sample") + 
+  geom_text_repel(aes(label = sample_names)) +
+  coord_fixed(ratio = 1.5) +
+  theme_classic()
+
+plot(sample)
+
+```
+
+#### PCA By **Alports**
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+alports <-DESeq2::plotPCA(rld, ntop = 1000, intgroup = "Alports") + 
+  geom_text_repel(aes(label = sample_names)) +
+  coord_fixed(ratio = 1.5) +
+  theme_classic()
+
+plot(alports)
+
+```
+
+#### PCA By **Group**
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+group <-DESeq2::plotPCA(rld, ntop = 1000, intgroup = "Group") + 
+  geom_text_repel(aes(label = sample_names)) +
+  coord_fixed(ratio = 1.5) +
+  theme_classic()
+
+plot(group)
+
+
+```
+
+### No 6M Alports
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+# head(SO2@meta.data)
+
+pbo <- AggregateExpression(SO2, 
+                           group.by = "sample",
+                           assays = 'RNA', 
+                           slot = "counts",
+                           return.seurat = FALSE)
+
+pbo <- pbo$RNA
+# pbo[1:5, 1:5]
+colnames(pbo) <- sub("^g", "", colnames(pbo))
+pbo <- pbo[, !colnames(pbo) %in% c("A", "B", "C")]
+#colnames(pbo)
+
+# DimPlot(SO2, group.by = "sample")
+
+metadata <- SO2@meta.data %>%
+  as.data.frame() %>%
+  dplyr::group_by(sample) %>%
+  dplyr::summarise(
+    Alports = names(sort(table(alports), decreasing = TRUE))[1],  # Most common value
+    Batch = names(sort(table(batch), decreasing = TRUE))[1],
+    Group = names(sort(table(group), decreasing = TRUE))[1]
+  ) %>%
+  as.data.frame()
+
+metadata <- metadata %>% 
+  dplyr::filter(Group != "6M_Alp")
+
+rownames(metadata) <- metadata$sample
+
+# head(metadata)
+
+dds <- DESeqDataSetFromMatrix(countData = round(pbo),
+                              colData = metadata,
+                              design = ~ sample)
+
+rld <- rlog(dds, blind=TRUE)
+
+sample_names <- unique(rld$sample)
+
+```
+
+#### PCA By **Sample**
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+# Plot PCA
+sample<-DESeq2::plotPCA(rld, ntop = 1000, intgroup = "sample") + 
+  geom_text_repel(aes(label = sample_names)) +
+  coord_fixed(ratio = 1.5) +
+  theme_classic()
+
+plot(sample)
+
+```
+
+#### PCA By **Alports**
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+alports <-DESeq2::plotPCA(rld, ntop = 1000, intgroup = "Alports") + 
+  geom_text_repel(aes(label = sample_names)) +
+  coord_fixed(ratio = 1.5) +
+  theme_classic()
+
+plot(alports)
+
+```
+
+#### PCA By **Group**
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+group <-DESeq2::plotPCA(rld, ntop = 1000, intgroup = "Group") + 
+  geom_text_repel(aes(label = sample_names)) +
+  coord_fixed(ratio = 1.5) +
+  theme_classic()
+
+plot(group)
+
+
+```
+
+
+### No EVs
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+# head(SO2@meta.data)
+
+pbo <- AggregateExpression(SO2, 
+                           group.by = "sample",
+                           assays = 'RNA', 
+                           slot = "counts",
+                           return.seurat = FALSE)
+
+pbo <- pbo$RNA
+# pbo[1:5, 1:5]
+colnames(pbo) <- sub("^g", "", colnames(pbo))
+pbo <- pbo[, !colnames(pbo) %in% c("473", "375", "364", "368", "475", "362")]
+#colnames(pbo)
+
+# DimPlot(SO2, group.by = "sample")
+
+metadata <- SO2@meta.data %>%
+  as.data.frame() %>%
+  dplyr::group_by(sample) %>%
+  dplyr::summarise(
+    Alports = names(sort(table(alports), decreasing = TRUE))[1],  # Most common value
+    Batch = names(sort(table(batch), decreasing = TRUE))[1],
+    Group = names(sort(table(group), decreasing = TRUE))[1]
+  ) %>%
+  as.data.frame()
+
+metadata <- metadata %>% 
+  dplyr::filter(Group != "4M_Alp_1EV")
+
+metadata <- metadata %>% 
+  dplyr::filter(Group != "4M_Alp_2EV")
+
+rownames(metadata) <- metadata$sample
+
+# head(metadata)
+
+dds <- DESeqDataSetFromMatrix(countData = round(pbo),
+                              colData = metadata,
+                              design = ~ sample)
+
+rld <- rlog(dds, blind=TRUE)
+
+sample_names <- unique(rld$sample)
+
+```
+
+#### PCA By **Sample**
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+# Plot PCA
+sample<-DESeq2::plotPCA(rld, ntop = 1000, intgroup = "sample") + 
+  geom_text_repel(aes(label = sample_names)) +
+  coord_fixed(ratio = 1.5) +
+  theme_classic()
+
+plot(sample)
+
+```
+
+#### PCA By **Alports**
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+alports <-DESeq2::plotPCA(rld, ntop = 1000, intgroup = "Alports") + 
+  geom_text_repel(aes(label = sample_names)) +
+  coord_fixed(ratio = 1.5) +
+  theme_classic()
+
+plot(alports)
+
+```
+
+#### PCA By **Group**
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+group <-DESeq2::plotPCA(rld, ntop = 1000, intgroup = "Group") + 
+  geom_text_repel(aes(label = sample_names)) +
+  coord_fixed(ratio = 1.5) +
+  theme_classic()
+
+plot(group)
+
+
+```
+
+# Session Info
+
+```{r sessioninfo, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+sessionInfo()
+
+```
+

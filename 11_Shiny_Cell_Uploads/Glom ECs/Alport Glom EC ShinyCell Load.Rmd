@@ -1,0 +1,251 @@
+---
+title: "Alport Glom EC Dataset ShinyCell Upload"
+author: "Jonathan Nelson"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  html_document: 
+    toc: yes
+    toc_depth: 3
+    toc_float: true
+    number_sections: yes
+    theme: bootstrap
+    df_print: paged
+    code_folding: hide
+    highlight: pygments
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r load new packages, echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+
+if (!require("dplyr")) {install.packages("dplyr"); require("dplyr")}
+if (!require("Seurat")) {install.packages("Seurat"); require("Seurat")}
+if (!require("patchwork")) {install.packages("patchwork"); require("patchwork")}
+if (!require("knitr")) {install.packages("knitr"); require("knitr")}
+if (!require("ggplot2")) {install.packages("ggplot2"); require("ggplot2")}
+if (!require("BiocManager")) {install.packages("BiocManager"); require("BiocManager")}
+if (!require("tibble")) {install.packages("tibble"); require("tibble")}
+if (!require("ggpmisc")) {install.packages("ggpmisc"); require("ggpmisc")}
+if (!require("RColorBrewer")) {install.packages("RColorBrewer"); require("RColorBrewer")} #color
+if (!require("ggrepel")) {install.packages("ggrepel"); require("ggrepel")}
+if (!require("DESeq2")) {BiocManager::install('DESeq2'); require("DESeq2")}
+if (!require("here")) {install.packages("here"); require("here")}
+if (!require("Signac")) {BiocManager::install('Signac'); require("Signac")}
+
+here()
+
+```
+
+
+# Load Data
+
+
+```{r load data, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE}
+
+SO <- readRDS(file = here("outputs", "Alports_Glom_EC.rds"))
+
+SO@meta.data <- SO@meta.data %>% 
+  mutate(subclass_EC = dplyr::case_when(
+    seurat_clusters == 0  ~ "Type_A",
+    seurat_clusters == 1  ~ "Type_A",
+    seurat_clusters == 2  ~ "Type_B",
+    seurat_clusters == 3  ~ "Type_B",
+    seurat_clusters == 4  ~ "Type_C",
+    seurat_clusters == 5  ~ "Type_D",
+    seurat_clusters == 6  ~ "Type_Mito",
+    seurat_clusters == 7  ~ "Type_D",
+    seurat_clusters == 8  ~ "Type_E",
+    seurat_clusters == 9  ~ "Type_Prolif"
+  ))
+
+SO@meta.data <- SO@meta.data %>% 
+  mutate(subclass_EC_2 = dplyr::case_when(
+    subclass_EC == "Type_A"  ~ "Type 1",
+    subclass_EC == "Type_B"  ~ "Type 2",
+    subclass_EC == "Type_C"  ~ "Type 4",
+    subclass_EC == "Type_D"  ~ "Type 3",
+    subclass_EC == "Type_E" ~ "Type 6",
+    subclass_EC == "Type_Mito"  ~ "Type 5",
+    subclass_EC == "Type_Prolif"  ~ "Type 7"
+  ))
+
+SO@meta.data$subclass_EC_2 <- factor(
+  SO@meta.data$subclass_EC_2,
+  levels = c(
+    "Type 1",
+    "Type 2",
+    "Type 3",
+    "Type 4",
+    "Type 5",
+    "Type 6",
+    "Type 7"
+  )
+)
+
+DimPlot(SO, group.by = "subclass_EC_2") + 
+  ylab("UMAP 2") +
+  xlab("UMAP 1") +
+  theme_classic() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 20),
+    axis.line = element_line(size = 1, colour = "black"),
+    axis.text = element_blank(),          # Remove axis text
+    axis.ticks = element_blank(),         # Optional: Remove axis ticks
+    text = element_text(size = 20)
+  ) + 
+  ggtitle("")
+
+```
+
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+################### 1. ------------------------------------------------------------------------------------------------------------
+
+# Shinycell installation
+reqPkg = c("data.table", "Matrix", "hdf5r", "reticulate", "ggplot2", 
+           "gridExtra", "glue", "readr", "RColorBrewer", "R.utils", "Seurat")
+newPkg = reqPkg[!(reqPkg %in% installed.packages()[,"Package"])]
+if(length(newPkg)){install.packages(newPkg)}
+
+# If you are using h5ad file as input, run the code below as well
+# reticulate::py_install("anndata")
+
+#devtools::install_github("SGDDNB/ShinyCell")
+
+
+################### 2. Skip if the seurat object is ready to be loaded directly. --------------------------------------------------
+
+seu <- SO
+
+head(seu@meta.data)
+
+#Confirm active identity of dataset
+
+Idents(seu) <- seu@meta.data$subclass_EC_2
+
+head(seu@active.ident)
+
+# The down-size step is redundant - as ShinyCell does this automatically. Keeping the following lines here just for the record.
+# Down-size the seurat object by removing the raw counts, keeping the scaled.data, and keeping one assay --------------------------
+# seu <- DietSeurat(seu, counts = FALSE, scale.data = TRUE, dimreducs = "umap", assays = "RNA")
+
+# Below is the DietSeurat() function details.
+# DietSeurat(
+#   object,
+#   counts = TRUE, # Preserve the count matrices for the assays specified
+#   data = TRUE, # Preserve the data slot for the assays specified
+#   scale.data = FALSE, # Preserve the scale.data slot for the assays specified
+#   features = NULL, # Only keep a subset of features, defaults to all features
+#   assays = NULL, # Only keep a subset of assays specified here
+#   dimreducs = NULL, # Only keep a subset of DimReducs specified here (if NULL, remove all DimReducs)
+#   graphs = NULL, # Only keep a subset of Graphs specified here (if NULL, remove all Graphs)
+#   misc = TRUE # Preserve the misc slot; default is TRUE
+# )
+
+# Clean up the meta.data for more user-friendly interface (not required) ----------------------------------------------------------
+
+head(seu@meta.data)
+
+seu$orig.ident <- NULL
+seu$unintegrated_clusters <- NULL
+seu$seurat_clusters<- NULL
+seu$RNA_snn_res.0.4 <- NULL
+seu$pANN <- NULL
+seu$SCT_snn_res.1 <- NULL
+seu$subclass_merge <- NULL
+seu$group_num <- NULL
+seu$SCT_snn_res.2 <- NULL
+seu$S.Score <- NULL
+seu$G2M.Score <- NULL
+seu$DF.class <- NULL
+seu$class_merge <- NULL
+seu$SCT_snn_res.0.5 <- NULL
+seu$subclass_EC <- NULL
+
+head(seu@meta.data)
+
+# Rename the columns for easier understanding
+
+colnames(seu@meta.data)[colnames(seu@meta.data) == "CellType"] ="Cell Type"
+colnames(seu@meta.data)[colnames(seu@meta.data) == "percent.mt"] ="Percent Mitochondria"
+colnames(seu@meta.data)[colnames(seu@meta.data) == "sample"] ="Sample"
+colnames(seu@meta.data)[colnames(seu@meta.data) == "batch"] ="Batch"
+colnames(seu@meta.data)[colnames(seu@meta.data) == "group"] ="Group"
+colnames(seu@meta.data)[colnames(seu@meta.data) == "alports"] ="Alport"
+colnames(seu@meta.data)[colnames(seu@meta.data) == "ev"] ="EV"
+colnames(seu@meta.data)[colnames(seu@meta.data) == "old.ident"] ="Abbreviated Cell Type"
+colnames(seu@meta.data)[colnames(seu@meta.data) == "subclass_EC_2"] ="EC Cell Type"
+
+# Reorder the columns from important ones as the order will be consistent with the drop-down menu
+
+colnames(seu@meta.data) # Get all column names
+
+# [1] "nCount_RNA"            "nFeature_RNA"          "Percent Mitochondria"  "Sample"               
+# [5] "nCount_SCT"            "nFeature_SCT"          "Batch"                 "Group"                
+# [9] "Alports"               "EV"                    "Phase"                 "Abbreviated Cell Type"
+# [13] "Cell Type"    
+
+# Re-order the columns by name
+
+seu@meta.data <- seu@meta.data[, c( "EC Cell Type", "Group", "Alport", "EV", "Sample", "Batch", "nCount_RNA", "nFeature_RNA", "nCount_SCT", "nFeature_SCT", "Percent Mitochondria"), ]            
+
+colnames(seu@meta.data) # Get all column names
+
+# [1] "EC Cell Type"         "Group"                "Alport"               "EV"                  
+# [5] "Sample"               "Batch"                "nCount_RNA"           "nFeature_RNA"        
+# [9] "nCount_SCT"           "nFeature_SCT"         "Percent Mitochondria"
+
+################### 3.-------------------------------------------------------------------------------------------------------------
+
+
+
+# Generate the shiny app
+
+library(Seurat)
+library(ShinyCell)
+
+scConf = createConfig(seu)
+makeShinyApp(seu, scConf, gene.mapping = TRUE, gex.assay = "SCT", default.gene1 = "Flt1", default.gene2 = "Esm1",
+             shiny.title = "scRNAseq of Glomerular Endothelial Cells from Mice with Alport Syndrome",
+       default.multigene = c("Csrnp1",        # Endo
+                      "Fabp4",       # Immune
+                      "Slc6a6",       # Mesangial
+                      "Slc45a4",        # Podo        
+                      "mt-Nd5",        # PEC
+                      "Dlk1",        # VSMC
+                      "Uhrf1"
+                            )   
+             ) 
+
+```
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+default.multigene <- c("Csrnp1",        # Endo
+                      "Fabp4",        # Immune
+                      "Slc6a6",       # Mesangial
+                      "Slc45a4",        # Podo        
+                      "mt-Nd5",        # PEC
+                      "Dlk1",        # VSMC
+                      "Uhrf1"
+                            )      
+
+DotPlot(seu, features = default.multigene)
+```
+
+
+# Session Info
+
+```{r sessioninfo, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+sessionInfo()
+
+```
+
+
+  

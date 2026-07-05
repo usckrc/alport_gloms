@@ -1,0 +1,1473 @@
+---
+title: "Alports Glom Podo Analysis"
+author: "Jonathan Nelson"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document: 
+    toc: yes
+    toc_depth: 3
+    toc_float: true
+    number_sections: yes
+    theme: bootstrap
+    df_print: paged
+    code_folding: hide
+    highlight: pygments
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load Packages
+
+```{r load new packages, echo=TRUE, error=FALSE, message=FALSE, warning=FALSE}
+
+if (!require("knitr")) {install.packages("knitr"); require("knitr")}
+if (!requireNamespace('BiocManager', quietly = TRUE)) {install.packages('BiocManager'); require("BiocManager")}
+if (!require("dplyr")) {install.packages("dplyr"); require("dplyr")}
+if (!require("stringr")) {install.packages("stringr"); require("stringr")}
+if (!require("Seurat")) {install.packages("Seurat"); require("Seurat")}
+if (!require("sctransform")) {install.packages("sctransform"); require("sctransform")}
+if (!require("glmGamPoi")) {BiocManager::install('glmGamPoi'); require("glmGamPoi")}
+if (!require("patchwork")) {install.packages("patchwork"); require("patchwork")}
+if (!require("ggplot2")) {install.packages("ggplot2"); require("ggplot2")}
+if (!require("EnhancedVolcano")) {BiocManager::install('EnhancedVolcano'); require("EnhancedVolcano")}
+if (!require("DESeq2")) {BiocManager::install('DESeq2'); require("DESeq2")}
+if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")}
+if (!require("RColorBrewer")) {install.packages("RColorBrewer"); require("RColorBrewer")}
+if (!require("car")) {install.packages("car"); require("car")}
+if (!require("openxlsx")) {install.packages("openxlsx"); require("openxlsx")}
+if (!require("readxl")) {install.packages("readxl"); require("readxl")}
+if (!require("ggrepel")) {install.packages("ggrepel"); require("ggrepel")}
+if (!require("gghighlight")) {install.packages("gghighlight"); require("gghighlight")}
+if (!require("ggpmisc")) {install.packages("ggpmisc"); require("ggpmisc")}
+if (!require("data.table")) {install.packages("data.table"); require("data.table")}
+if (!require("here")) {install.packages("here"); require("here")}
+if (!require("clusterProfiler")) {BiocManager::install('clusterProfiler'); require("clusterProfiler")}
+if (!require("enrichplot")) {BiocManager::install('enrichplot'); require("enrichplot")}
+if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")} # for data frame transformation
+if (!require("gplots")) {install.packages("gplots"); require("gplots")}
+if (!require("ggvenn")) {install.packages("ggvenn"); require("ggvenn")}
+if (!require("ggrepel")) {install.packages("ggrepel"); require("ggrepel")}
+if (!require("clusterProfiler")) {BiocManager::install('clusterProfiler'); require("clusterProfiler")}
+if (!require("BiocManager", quietly = TRUE))
+#    install.packages("BiocManager")
+#BiocManager::install("org.Mm.eg.db")
+
+
+library("EnhancedVolcano")
+library(UpSetR)
+library(ComplexHeatmap)
+#install.packages("ggtext")
+library(ggtext)
+library(kableExtra) 
+
+
+options(future.globals.maxSize = 74 * 1024^3) # 55 GB
+getOption("future.globals.maxSize") #59055800320
+
+here()
+
+```
+
+# Introduction
+
+## Email from Sargis on 11/3/2025
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+SO <- readRDS(file = here("outputs", "Alports_041525.rds"))
+
+DimPlot(SO, label = T)
+
+SO_whole <- SO
+
+```
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE}
+
+SO_podo <- subset(SO, idents = "PODO")
+
+DimPlot(SO_podo, label = T)
+
+SO_podo <- SCTransform(SO_podo) %>%
+    RunPCA() %>%
+    FindNeighbors(dims = 1:30) %>%
+    FindClusters(resolution = 1) %>%
+    RunUMAP(dims = 1:30)
+
+DimPlot(SO_podo, label = T)
+
+DimPlot(SO_podo, label = T, group.by = "group")
+
+FeaturePlot(SO_podo, "Nphs2")
+
+VlnPlot(SO_podo, "Nphs2")
+
+FeaturePlot(SO_podo, "Kdr")
+
+VlnPlot(SO_podo, "Kdr")
+
+FeaturePlot(SO_podo, "Pecam1")
+
+VlnPlot(SO_podo, "Pecam1")
+
+FeaturePlot(SO_podo, "Cdh5")
+
+VlnPlot(SO_podo, "Cdh5")
+
+FeaturePlot(SO_podo, "Pdgfrb")
+
+VlnPlot(SO_podo, "Pdgfrb")
+
+```
+
+
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE}
+
+SO_podo <- subset(SO_podo, idents = "0", invert = TRUE)
+
+DimPlot(SO_podo)
+
+```
+
+## Heatmap
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE}
+
+SO.markers <- FindAllMarkers(SO_podo, only.pos = TRUE, min.pct = .25)
+
+SO.markers %>%
+    group_by(cluster) %>%
+    dplyr::filter(avg_log2FC > 1) %>%
+    slice_head(n = 5) %>%
+    ungroup() -> top10
+
+DoHeatmap(SO_podo, features = top10$gene) + NoLegend() +
+  theme(plot.margin = margin(20, 80, 10, 10))
+
+```
+
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+t1 <- table(SO_podo@meta.data$seurat_clusters, SO_podo$group)[, c("WT", "4M_Alp", "4M_Alp_1EV", "4M_Alp_2EV", "6M_Alp")]
+#t1
+
+prop.t1 <- prop.table(t1, margin = 2) 
+#prop.t1
+
+t2 <- as.data.frame(t1)
+colnames(t2) <- c('Cell_type', 'Group', 'Frequency')
+
+# Original plot
+
+library(scales)   # ggplot2 depends on this
+
+# ggplot2 default discrete palette (6 colors)
+my_colors2 <- scales::hue_pal()(11)
+
+
+ggplot(t2, aes(fill=Cell_type, y=Frequency, x=Group)) + 
+  geom_bar(position="fill", stat = "identity", fun.y = "mean", colour="black") +
+  scale_fill_manual(values = my_colors2) +
+  theme_classic()
+
+```
+
+#### DEG Setup
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+Condition_Baseline <- "WT"
+
+Condition_A <- "4M_Alp"
+  
+Condition_B <- "4M_Alp_1EV"
+
+Condition_C <- "4M_Alp_2EV"
+
+Condition_D <- "6M_Alp"
+
+clusters <- unique(SO_podo@meta.data$class_merge)
+names(clusters) <- clusters
+
+SO <- PrepSCTFindMarkers(SO_podo)
+DEG.env <- new.env()
+
+Idents(SO_podo) <- SO_podo@meta.data$group
+
+DefaultAssay(SO_podo) <- "SCT"
+
+```
+
+#### df1
+
+4M_Alp vs. WT
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+DEGs <- FindMarkers(SO_podo, ident.1 = Condition_A, ident.2 = Condition_Baseline, logfc.threshold = .1, min.pct = .1)
+DEGs <- DEGs %>% rownames_to_column("gene") %>% filter(p_val_adj < .05)
+DEGs <- DEGs[order(DEGs[,"avg_log2FC"], decreasing = TRUE),]
+
+#remove the first column of from the dataframe DEGs
+DEGs <- rownames_to_column(DEGs)
+DEGs <- DEGs[,-1]
+
+df <- head(DEGs, 20)
+
+df
+
+df1 <- DEGs
+
+
+```
+
+#### df2
+
+4M_Alp_1EV vs. 4M_Alp
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+DEGs <- FindMarkers(SO_podo, ident.1 = Condition_B, ident.2 = Condition_A, logfc.threshold = .1, min.pct = .1)
+DEGs <- DEGs %>% rownames_to_column("gene") %>% filter(p_val_adj < .05)
+DEGs <- DEGs[order(DEGs[,"avg_log2FC"], decreasing = TRUE),]
+
+#remove the first column of from the dataframe DEGs
+DEGs <- rownames_to_column(DEGs)
+DEGs <- DEGs[,-1]
+
+df <- head(DEGs, 20)
+
+df
+
+df2 <- DEGs
+
+
+```
+
+#### df3
+
+4M_Alp_2EV vs. 4M_Alp
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+DEGs <- FindMarkers(SO_podo, ident.1 = Condition_C, ident.2 = Condition_A, logfc.threshold = .1, min.pct = .1)
+DEGs <- DEGs %>% rownames_to_column("gene") %>% filter(p_val_adj < .05)
+DEGs <- DEGs[order(DEGs[,"avg_log2FC"], decreasing = TRUE),]
+
+#remove the first column of from the dataframe DEGs
+DEGs <- rownames_to_column(DEGs)
+DEGs <- DEGs[,-1]
+
+df <- head(DEGs, 20)
+
+df
+
+df3 <- DEGs
+
+```
+
+#### df4
+
+Corrected from original version on 3.6.26 (orginal comparison was 6M_Alp vs. WT...this is moved to df5)
+
+6M_Alp vs. 4M_Alp
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+DEGs <- FindMarkers(SO_podo, ident.1 = Condition_D, ident.2 = Condition_A, logfc.threshold = .1, min.pct = .1)
+DEGs <- DEGs %>% rownames_to_column("gene") %>% filter(p_val_adj < .05)
+DEGs <- DEGs[order(DEGs[,"avg_log2FC"], decreasing = TRUE),]
+
+#remove the first column of from the dataframe DEGs
+DEGs <- rownames_to_column(DEGs)
+DEGs <- DEGs[,-1]
+
+df <- head(DEGs, 20)
+
+df
+
+df4 <- DEGs
+
+```
+
+#### df5
+
+6M_Alp vs. WT
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+DEGs <- FindMarkers(SO_podo, ident.1 = Condition_D, ident.2 = Condition_Baseline, logfc.threshold = .1, min.pct = .1)
+DEGs <- DEGs %>% rownames_to_column("gene") %>% filter(p_val_adj < .05)
+DEGs <- DEGs[order(DEGs[,"avg_log2FC"], decreasing = TRUE),]
+
+#remove the first column of from the dataframe DEGs
+DEGs <- rownames_to_column(DEGs)
+DEGs <- DEGs[,-1]
+
+df <- head(DEGs, 20)
+
+df
+
+df5 <- DEGs
+
+```
+
+
+#### Write Spreadsheet of DEG Lits
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+# Create workbook
+wb <- createWorkbook()
+
+# Add sheets + write data
+addWorksheet(wb, "df1 - 4M_Alp vs. WT")
+writeData(wb, "df1 - 4M_Alp vs. WT", df1)
+
+addWorksheet(wb, "df2 - 4M_Alp_1EV vs. 4M_Alp")
+writeData(wb, "df2 - 4M_Alp_1EV vs. 4M_Alp", df2)
+
+addWorksheet(wb, "df3 - 4M_Alp_2EV vs. 4M_Alp")
+writeData(wb, "df3 - 4M_Alp_2EV vs. 4M_Alp", df3)
+
+addWorksheet(wb, "df4 - 6M_Alp vs. 4M_Alp")
+writeData(wb, "df4 - 6M_Alp vs. 4M_Alp", df4)
+
+addWorksheet(wb, "df5 - 6M_Alp vs. WT")
+writeData(wb, "df5 - 6M_Alp vs. WT", df5)
+
+# Save workbook
+saveWorkbook(wb, "PODO_compiled_DEG_lists_070426.xlsx", overwrite = TRUE)
+
+```
+
+#### Filter and Split Positive and Negative Lists
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+df_summary <- tibble(
+  dataframe = c("df1", "df2", "df3", "df4", "df5"),
+  nrows = c(nrow(df1), nrow(df2), nrow(df3), nrow(df4), nrow(df5))
+)
+
+# Plot
+ggplot(df_summary, aes(x = dataframe, y = nrows, fill = dataframe)) +
+  geom_col() +
+  labs(
+    title = "Number of DEGs",
+    x = "Dataframe",
+    y = "Number of DEGs"
+  ) +
+  theme_classic() +
+  theme(legend.position = "none")
+
+
+
+
+```
+
+
+#### Filter and Split Positive and Negative Lists
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+df1_pos <- df1 %>% filter(avg_log2FC > 0) %>% filter(p_val_adj < 0.05) %>% filter(avg_log2FC > .25) %>% arrange(desc(abs(avg_log2FC)))
+
+df1_pos
+
+df1_neg <- df1 %>% filter(avg_log2FC < 0) %>% filter(p_val_adj < 0.05) %>% filter(avg_log2FC < -.25) %>% arrange(desc(abs(avg_log2FC)))
+
+df1_neg
+
+df2_pos <- df2 %>% filter(avg_log2FC > 0) %>% filter(p_val_adj < 0.05) %>% filter(avg_log2FC > .25) %>% arrange(desc(abs(avg_log2FC)))
+
+df2_pos
+
+df2_neg <- df2 %>% filter(avg_log2FC < 0) %>% filter(p_val_adj < 0.05) %>% filter(avg_log2FC < -.25) %>% arrange(desc(abs(avg_log2FC)))
+
+df2_neg
+
+df3_pos <- df3 %>% filter(avg_log2FC > 0) %>% filter(p_val_adj < 0.05) %>% filter(avg_log2FC > .25) %>% arrange(desc(abs(avg_log2FC)))
+
+df3_pos
+
+df3_neg <- df3 %>% filter(avg_log2FC < 0) %>% filter(p_val_adj < 0.05) %>% filter(avg_log2FC < -.25) %>% arrange(desc(abs(avg_log2FC)))
+
+df3_neg
+
+df4_pos <- df4 %>% filter(avg_log2FC > 0) %>% filter(p_val_adj < 0.05) %>% filter(avg_log2FC > .25) %>% arrange(desc(abs(avg_log2FC)))
+
+df4_pos
+
+df4_neg <- df4 %>% filter(avg_log2FC < 0) %>% filter(p_val_adj < 0.05) %>% filter(avg_log2FC < -.25) %>% arrange(desc(abs(avg_log2FC)))
+
+df4_neg
+
+df5_pos <- df5 %>% filter(avg_log2FC > 0) %>% filter(p_val_adj < 0.05) %>% filter(avg_log2FC > .25) %>% arrange(desc(abs(avg_log2FC)))
+
+df5_pos
+
+df5_neg <- df5 %>% filter(avg_log2FC < 0) %>% filter(p_val_adj < 0.05) %>% filter(avg_log2FC < -.25) %>% arrange(desc(abs(avg_log2FC)))
+
+df5_neg
+
+# List only the pos/neg data frames
+dfs <- list(
+  df1_pos = df1_pos,
+  df1_neg = df1_neg,
+  df2_pos = df2_pos,
+  df2_neg = df2_neg,
+  df3_pos = df3_pos,
+  df3_neg = df3_neg,
+  df4_pos = df4_pos,
+  df4_neg = df4_neg,
+  df5_pos = df5_pos,
+  df5_neg = df5_neg
+)
+
+# Create summary table
+df_summary <- tibble(
+  dataframe = names(dfs),
+  nrows = sapply(dfs, nrow),
+  group = sub("_(pos|neg)$", "", names(dfs)),  # extract df1, df2, df3, df4
+  type = sub("^df[0-9]+_", "", names(dfs))     # extract pos / neg
+)
+
+# Plot grouped bars
+ggplot(df_summary, aes(x = group, y = nrows, fill = type)) +
+  geom_col(position = "dodge") +
+  labs(
+    title = "Number of DEGs",
+    x = "Dataframe",
+    y = "DEGs",
+    fill = "Subset"
+  ) +
+  theme_classic()
+
+```
+
+### Improved Graphs on 030626
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+df_summary <- tibble(
+  dataframe = c("mid-AS", "late-AS"),
+  nrows = c(nrow(df1), nrow(df5))
+)
+
+df_summary <- df_summary %>%
+  mutate(dataframe = factor(dataframe, levels = c("mid-AS", "late-AS")))
+
+# Plot
+ggplot(df_summary, aes(x = dataframe, y = nrows, fill = dataframe)) +
+  geom_col() +
+  labs(
+    title = NULL,
+    x = NULL,
+    y = "Number of DEGs"
+  ) +
+  theme_classic() +
+  theme(
+    axis.ticks = element_line(size = 2),   # 1.2 * 3
+    axis.line = element_line(size = 2),    # 1.2 * 3
+    axis.title = element_text(size = 24),    # 20 * 2
+    axis.text = element_text(size = 24),     # 16 * 2
+    legend.position = "none"
+  )
+
+```
+
+
+### Improved Graphs on 030626
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+dfs <- list(
+  df1_pos = df1_pos,
+  df1_neg = df1_neg,
+  df5_pos = df5_pos,
+  df5_neg = df5_neg
+)
+
+# Create summary table
+df_summary2 <- tibble(
+  dataframe = names(dfs),
+  nrows = sapply(dfs, nrow),
+  group = sub("_(pos|neg)$", "", names(dfs)),  # extract df1, df2, df3, df4
+  type = sub("^df[0-9]+_", "", names(dfs))     # extract pos / neg
+)
+
+df_summary2 <- df_summary2 %>%
+  mutate(group = case_when(
+    group == "df1" ~ "mid-AS",
+    group == "df5" ~ "late-AS",
+    TRUE ~ group
+  ))
+
+df_summary2 <- df_summary2 %>%
+  mutate(group = factor(group, levels = c("mid-AS", "late-AS")))
+
+# Plot grouped bars
+ggplot(df_summary2, aes(x = group, y = nrows, fill = type)) +
+  geom_col(position = "dodge") +
+  labs(
+    title = NULL,
+    x = NULL,
+    y = "DEGs",
+    fill = "Subset"
+  ) +
+  theme_classic() +
+  theme(
+    axis.ticks = element_line(size = 2),
+    axis.line = element_line(size = 2),
+    axis.title = element_text(size = 24),
+    axis.text = element_text(size = 24),
+    legend.title = element_text(size = 24),
+    legend.text = element_text(size = 24)
+  )
+
+```
+# Q4
+
+## Pseudobulk PCA
+
+### ALL GROUPS
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+# head(SO_podo@meta.data)
+
+pbo <- AggregateExpression(SO_podo, 
+                           group.by = "sample",
+                           assays = 'RNA', 
+                           slot = "counts",
+                           return.seurat = FALSE)
+
+pbo <- pbo$RNA
+# pbo[1:5, 1:5]
+colnames(pbo) <- sub("^g", "", colnames(pbo))
+# colnames(pbo)[1:5]
+
+# DimPlot(SO_podo, group.by = "sample")
+
+metadata <- SO_podo@meta.data %>%
+  as.data.frame() %>%
+  dplyr::group_by(sample) %>%
+  dplyr::summarise(
+    Alports = names(sort(table(alports), decreasing = TRUE))[1],  # Most common value
+    Batch = names(sort(table(batch), decreasing = TRUE))[1],
+    Group = names(sort(table(group), decreasing = TRUE))[1]
+  ) %>%
+  as.data.frame()
+
+rownames(metadata) <- metadata$sample
+
+# head(metadata)
+
+dds <- DESeqDataSetFromMatrix(countData = round(pbo),
+                              colData = metadata,
+                              design = ~ sample)
+
+rld <- rlog(dds, blind=TRUE)
+
+sample_names <- unique(rld$sample)
+
+```
+
+#### PCA By **Sample**
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+# Plot PCA
+sample<-DESeq2::plotPCA(rld, ntop = 1000, intgroup = "sample") + 
+  geom_text_repel(aes(label = sample_names)) +
+  coord_fixed(ratio = 1.5) +
+  theme_classic()
+
+plot(sample)
+
+```
+
+#### PCA By **Alports**
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+alports <-DESeq2::plotPCA(rld, ntop = 1000, intgroup = "Alports") + 
+  geom_text_repel(aes(label = sample_names)) +
+  coord_fixed(ratio = 1.5) +
+  theme_classic()
+
+plot(alports)
+
+```
+
+#### PCA By **Group**
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+group <-DESeq2::plotPCA(rld, ntop = 1000, intgroup = "Group") + 
+  geom_text_repel(aes(label = sample_names)) +
+  coord_fixed(ratio = 1.5) +
+  theme_classic()
+
+plot(group)
+
+
+```
+
+### No 6M Alports
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+# head(SO_podo@meta.data)
+
+pbo <- AggregateExpression(SO_podo, 
+                           group.by = "sample",
+                           assays = 'RNA', 
+                           slot = "counts",
+                           return.seurat = FALSE)
+
+pbo <- pbo$RNA
+# pbo[1:5, 1:5]
+colnames(pbo) <- sub("^g", "", colnames(pbo))
+pbo <- pbo[, !colnames(pbo) %in% c("A", "B", "C")]
+#colnames(pbo)
+
+# DimPlot(SO_podo, group.by = "sample")
+
+metadata <- SO_podo@meta.data %>%
+  as.data.frame() %>%
+  dplyr::group_by(sample) %>%
+  dplyr::summarise(
+    Alports = names(sort(table(alports), decreasing = TRUE))[1],  # Most common value
+    Batch = names(sort(table(batch), decreasing = TRUE))[1],
+    Group = names(sort(table(group), decreasing = TRUE))[1]
+  ) %>%
+  as.data.frame()
+
+metadata <- metadata %>% 
+  dplyr::filter(Group != "6M_Alp")
+
+rownames(metadata) <- metadata$sample
+
+# head(metadata)
+
+dds <- DESeqDataSetFromMatrix(countData = round(pbo),
+                              colData = metadata,
+                              design = ~ sample)
+
+rld <- rlog(dds, blind=TRUE)
+
+sample_names <- unique(rld$sample)
+
+```
+
+#### PCA By **Sample**
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+# Plot PCA
+sample<-DESeq2::plotPCA(rld, ntop = 1000, intgroup = "sample") + 
+  geom_text_repel(aes(label = sample_names)) +
+  coord_fixed(ratio = 1.5) +
+  theme_classic()
+
+plot(sample)
+
+```
+
+#### PCA By **Alports**
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+alports <-DESeq2::plotPCA(rld, ntop = 1000, intgroup = "Alports") + 
+  geom_text_repel(aes(label = sample_names)) +
+  coord_fixed(ratio = 1.5) +
+  theme_classic()
+
+plot(alports)
+
+```
+
+#### PCA By **Group**
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+group <-DESeq2::plotPCA(rld, ntop = 1000, intgroup = "Group") + 
+  geom_text_repel(aes(label = sample_names)) +
+  coord_fixed(ratio = 1.5) +
+  theme_classic()
+
+plot(group)
+
+group_f1 <- group
+
+```
+
+
+### No EVs
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+# head(SO_podo@meta.data)
+
+pbo <- AggregateExpression(SO_podo, 
+                           group.by = "sample",
+                           assays = 'RNA', 
+                           slot = "counts",
+                           return.seurat = FALSE)
+
+pbo <- pbo$RNA
+# pbo[1:5, 1:5]
+colnames(pbo) <- sub("^g", "", colnames(pbo))
+pbo <- pbo[, !colnames(pbo) %in% c("473", "375", "364", "368", "475", "362")]
+#colnames(pbo)
+
+# DimPlot(SO_podo, group.by = "sample")
+
+metadata <- SO_podo@meta.data %>%
+  as.data.frame() %>%
+  dplyr::group_by(sample) %>%
+  dplyr::summarise(
+    Alports = names(sort(table(alports), decreasing = TRUE))[1],  # Most common value
+    Batch = names(sort(table(batch), decreasing = TRUE))[1],
+    Group = names(sort(table(group), decreasing = TRUE))[1]
+  ) %>%
+  as.data.frame()
+
+metadata <- metadata %>% 
+  dplyr::filter(Group != "4M_Alp_1EV")
+
+metadata <- metadata %>% 
+  dplyr::filter(Group != "4M_Alp_2EV")
+
+rownames(metadata) <- metadata$sample
+
+# head(metadata)
+
+dds <- DESeqDataSetFromMatrix(countData = round(pbo),
+                              colData = metadata,
+                              design = ~ sample)
+
+rld <- rlog(dds, blind=TRUE)
+
+sample_names <- unique(rld$sample)
+
+```
+
+#### PCA By **Sample**
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+# Plot PCA
+sample<-DESeq2::plotPCA(rld, ntop = 1000, intgroup = "sample") + 
+  geom_text_repel(aes(label = sample_names)) +
+  coord_fixed(ratio = 1.5) +
+  theme_classic()
+
+plot(sample)
+
+```
+
+#### PCA By **Alports**
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+alports <-DESeq2::plotPCA(rld, ntop = 1000, intgroup = "Alports") + 
+  geom_text_repel(aes(label = sample_names)) +
+  coord_fixed(ratio = 1.5) +
+  theme_classic()
+
+plot(alports)
+
+```
+
+#### PCA By **Group**
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+group <-DESeq2::plotPCA(rld, ntop = 1000, intgroup = "Group") + 
+  geom_text_repel(aes(label = sample_names)) +
+  coord_fixed(ratio = 1.5) +
+  theme_classic()
+
+plot(group)
+
+
+```
+
+
+# Figures
+
+## Figure A
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+library(Seurat)
+library(ggplot2)
+library(scales)
+
+# Define colors matching your figure
+mycols2 <- c(
+  EC   = alpha("#F8766D", 0.25),  # faded 75%
+  IMM  = alpha("#B79F00", 0.25),
+  MES  = alpha("#00BA38", 0.25),
+  PODO = "#00BFC4",               # full intensity
+  PEC  = alpha("#619CFF", 0.25),
+  VSMC = alpha("#F564E3", 0.25)
+)
+
+mycols<- c(
+  EC   = "#F3D4D1",
+  IMM  = "#E8E0B8",
+  MES  = "#D2EBCF",
+  PODO = "#00BFC4",
+  PEC  = "#D8E5FF",
+  VSMC = "#F2D8EC"
+)
+
+DimPlot(
+  SO_whole,
+  group.by = "class_merge",
+  cols = mycols,
+  shuffle = TRUE
+) +
+  ylab("UMAP 2") +
+  xlab("UMAP 1") +
+  theme_classic() +
+  theme(
+    axis.line = element_line(linewidth = 1, colour = "black"),
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    text = element_text(size = 20)
+  ) +
+  ggtitle("")
+
+
+```
+
+## Figure B
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+DimPlot(
+  SO_podo,
+  group.by = "seurat_clusters"
+) +
+  ylab("UMAP 2") +
+  xlab("UMAP 1") +
+  theme_classic() +
+  theme(
+    axis.line = element_line(linewidth = 1, colour = "black"),
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    text = element_text(size = 20)
+  ) +
+  ggtitle("")
+
+```
+
+
+## Figure C
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+t1 <- table(
+  SO_podo@meta.data$seurat_clusters,
+  SO_podo$group
+)[, c("WT", "4M_Alp", "4M_Alp_1EV", "4M_Alp_2EV")]
+
+prop.t1 <- prop.table(t1, margin = 2)
+
+t2 <- as.data.frame(t1)
+colnames(t2) <- c("Cell_type", "Group", "Frequency")
+
+library(scales)
+
+# ggplot2 default discrete palette
+my_colors2 <- scales::hue_pal()(11)
+
+t2$Group <- factor(
+  t2$Group,
+  levels = c("WT", "4M_Alp", "4M_Alp_1EV", "4M_Alp_2EV"),
+  labels = c("Wild Type", "AS", "1T EVs", "2T EVs")
+)
+
+ggplot(t2, aes(fill = Cell_type, y = Frequency, x = Group)) +
+  geom_bar(
+    stat = "identity",
+    position = "fill",
+    colour = "black",
+    linewidth = 0.3
+  ) +
+  scale_fill_manual(values = my_colors2) +
+  xlab("") +
+  ylab("Proportion") +
+  ggtitle("") +
+  theme_classic() +
+  theme(
+    axis.line = element_line(linewidth = 1, colour = "black"),
+    axis.text = element_text(size = 18, colour = "black"),
+    axis.title = element_text(size = 20),
+    axis.ticks = element_line(linewidth = 1),
+    legend.title = element_blank(),
+    legend.text = element_text(size = 16),
+    text = element_text(size = 20)
+  )
+
+```
+
+## Figure D
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+pbo <- AggregateExpression(SO_podo, 
+                           group.by = "sample",
+                           assays = 'RNA', 
+                           slot = "counts",
+                           return.seurat = FALSE)
+
+pbo <- pbo$RNA
+# pbo[1:5, 1:5]
+colnames(pbo) <- sub("^g", "", colnames(pbo))
+pbo <- pbo[, !colnames(pbo) %in% c("A", "B", "C")]
+#colnames(pbo)
+
+# DimPlot(SO_podo, group.by = "sample")
+
+metadata <- SO_podo@meta.data %>%
+  as.data.frame() %>%
+  dplyr::group_by(sample) %>%
+  dplyr::summarise(
+    Alports = names(sort(table(alports), decreasing = TRUE))[1],  # Most common value
+    Batch = names(sort(table(batch), decreasing = TRUE))[1],
+    Group = names(sort(table(group), decreasing = TRUE))[1]
+  ) %>%
+  as.data.frame()
+
+metadata <- metadata %>% 
+  dplyr::filter(Group != "6M_Alp")
+
+rownames(metadata) <- metadata$sample
+
+# head(metadata)
+
+dds <- DESeqDataSetFromMatrix(countData = round(pbo),
+                              colData = metadata,
+                              design = ~ sample)
+
+rld <- rlog(dds, blind=TRUE)
+
+sample_names <- unique(rld$sample)
+
+# Recode and factor in the desired order
+colData(rld)$group2 <- factor(
+  dplyr::recode(
+    as.character(colData(rld)$Group),
+    "WT" = "Wild type",
+    "4M_Alp" = "AS",
+    "4M_Alp_1EV" = "1T EVs",
+    "4M_Alp_2EV" = "2T EVs"
+  ),
+  levels = c("Wild type", "AS", "1T EVs", "2T EVs")
+)
+
+group <- DESeq2::plotPCA(rld, ntop = 1000, intgroup = "group2") +
+  geom_point(size = 6) +          # 300% bigger points
+  coord_fixed(ratio = 1.5) +
+  theme_classic() +
+  theme(
+    axis.ticks = element_line(size = 1.2),
+    axis.line = element_line(size = 1.2),
+    axis.title = element_text(size = 20),
+    axis.text = element_text(size = 16),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 16)
+  )
+
+plot(group)
+
+
+```
+
+## Figure E
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+t1 <- table(
+  SO_podo@meta.data$seurat_clusters,
+  SO_podo$group
+)[, c("WT", "4M_Alp", "6M_Alp")]
+
+prop.t1 <- prop.table(t1, margin = 2)
+
+t2 <- as.data.frame(t1)
+colnames(t2) <- c("Cell_type", "Group", "Frequency")
+
+library(scales)
+
+# ggplot2 default discrete palette
+my_colors2 <- scales::hue_pal()(11)
+
+t2$Group <- factor(
+  t2$Group,
+  levels = c("WT", "4M_Alp", "6M_Alp"),
+  labels = c("Wild Type", "mid-AS", "late-AS")
+)
+
+ggplot(t2, aes(fill = Cell_type, y = Frequency, x = Group)) +
+  geom_bar(
+    stat = "identity",
+    position = "fill",
+    colour = "black",
+    linewidth = 0.3
+  ) +
+  scale_fill_manual(values = my_colors2) +
+  xlab("") +
+  ylab("Proportion") +
+  ggtitle("") +
+  theme_classic() +
+  theme(
+    axis.line = element_line(linewidth = 1, colour = "black"),
+    axis.text = element_text(size = 18, colour = "black"),
+    axis.title = element_text(size = 20),
+    axis.ticks = element_line(linewidth = 1),
+    legend.title = element_blank(),
+    legend.text = element_text(size = 16),
+    text = element_text(size = 20)
+  )
+
+
+```
+
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+pbo <- AggregateExpression(SO_podo, 
+                           group.by = "sample",
+                           assays = 'RNA', 
+                           slot = "counts",
+                           return.seurat = FALSE)
+
+pbo <- pbo$RNA
+# pbo[1:5, 1:5]
+colnames(pbo) <- sub("^g", "", colnames(pbo))
+pbo <- pbo[, !colnames(pbo) %in% c("473", "375", "364", "368", "475", "362")]
+#colnames(pbo)
+
+# DimPlot(SO_podo, group.by = "sample")
+
+metadata <- SO_podo@meta.data %>%
+  as.data.frame() %>%
+  dplyr::group_by(sample) %>%
+  dplyr::summarise(
+    Alports = names(sort(table(alports), decreasing = TRUE))[1],  # Most common value
+    Batch = names(sort(table(batch), decreasing = TRUE))[1],
+    Group = names(sort(table(group), decreasing = TRUE))[1]
+  ) %>%
+  as.data.frame()
+
+metadata <- metadata %>% 
+  dplyr::filter(Group != "4M_Alp_1EV")
+
+metadata <- metadata %>% 
+  dplyr::filter(Group != "4M_Alp_2EV")
+
+rownames(metadata) <- metadata$sample
+
+# head(metadata)
+
+dds <- DESeqDataSetFromMatrix(countData = round(pbo),
+                              colData = metadata,
+                              design = ~ sample)
+
+rld <- rlog(dds, blind=TRUE)
+
+sample_names <- unique(rld$sample)
+
+# Recode and factor in the desired order
+colData(rld)$group2 <- factor(
+  dplyr::recode(
+    as.character(colData(rld)$Group),
+    "WT" = "Wild type",
+    "4M_Alp" = "mid-AS",
+    "6M_Alp" = "late-AS",
+  ),
+  levels = c("Wild type", "mid-AS", "late-AS")
+)
+
+group <- DESeq2::plotPCA(rld, ntop = 1000, intgroup = "group2") +
+  geom_point(size = 6) +          # 300% bigger points
+  coord_fixed(ratio = 1.5) +
+  theme_classic() +
+  theme(
+    axis.ticks = element_line(size = 1.2),
+    axis.line = element_line(size = 1.2),
+    axis.title = element_text(size = 20),
+    axis.text = element_text(size = 16),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 16)
+  )
+
+plot(group)
+
+```
+
+## Figure G Venn Diagram
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+set1 <- rownames(df1)
+set2 <- rownames(df3)
+venn <- ggvenn(list('4m AS vs WT' = set1, '2T-EVs vs 4m AS' = set2))
+print(venn)
+
+
+```
+
+## Figure F 4M vs WT
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+
+# Genes to highlight
+genes_to_label <- c(
+  "Klf2",
+  "Dbp",
+  "Fosb",
+  "Atf3",
+  "Fos",
+  "Jun",
+  "Nr4a1",
+  "Ier2",
+  "Nr1d1",
+  "Egr1",
+  "Zfp36",
+  "Jund",
+  "Ak1",
+  "Tef",
+  "Rhob",
+  "Rgs3",
+  "Sertad1",
+  "Klf6",
+  "Aebp1",
+  "Nuak2",
+  "Ctgf",
+  "Pde10a",
+  "Kazn",
+  "Zbtb16",
+  "Plod2",
+  "Palld",
+  "Sdf2l1",
+  "Cgnl1",
+  "Col4a5",
+  "Col4a6",
+  "Rgs2",
+  "Itga1",
+  "Mmp2",
+  "Adamts4",
+  "Loxl1",
+  "Loxl3",
+  "Flna",
+  "Palmd",
+  "Cald1",
+  "Amot"
+)
+
+# Prepare data
+volcano_df <- df1 %>%
+  mutate(
+    significance = case_when(
+      p_val_adj < 0.05 & avg_log2FC > 0.1 ~ "Up",
+      p_val_adj < 0.05 & avg_log2FC < -0.1 ~ "Down",
+      TRUE ~ "Not significant"
+    ),
+    neg_log10_padj = -log10(pmax(p_val_adj, 1e-300))
+  )
+
+# Subset genes to label
+label_df <- volcano_df %>%
+  filter(gene %in% genes_to_label)
+
+# Volcano plot
+ggplot(volcano_df, aes(x = avg_log2FC, y = neg_log10_padj)) +
+  geom_point(aes(color = significance), alpha = 0.8, size = 2) +
+  geom_vline(xintercept = c(-0.1, 0.1), linetype = "dashed", linewidth = 0.5) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", linewidth = 0.5) +
+  geom_text_repel(
+    data = label_df,
+    aes(label = gene),
+    size = 3.5,
+    max.overlaps = Inf,
+    box.padding = 0.4,
+    point.padding = 0.2,
+    segment.color = "grey50"
+  ) +
+  scale_color_manual(values = c(
+    "Up" = "#D55E00",
+    "Down" = "#0072B2",
+    "Not significant" = "grey75"
+  )) +
+  theme_classic() +
+  theme(
+    axis.line = element_line(linewidth = 1),
+    axis.title = element_text(size = 18),
+    axis.text = element_text(size = 16),
+    legend.title = element_blank(),
+    legend.text = element_text(size = 14),
+    plot.title = element_text(size = 20, face = "bold", hjust = 0.5),
+    legend.position = "none"
+  ) +  
+  labs(
+    title = "4M AS vs Wild Type",
+    x = expression("Average log"[2] * " fold change"),
+    y = expression("-log"[10] * "(adjusted p-value)")
+  )
+
+
+```
+
+
+## Figure F 2EV vs. 4M
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+
+# Mouse gene symbols to highlight
+genes_to_label <- c(
+  "Gm16486",
+  "Klf2",
+  "Dbp",
+  "Fosb",
+  "Atf3",
+  "Fos",
+  "Jun",
+  "Nr4a1",
+  "Ier2",
+  "Nr1d1",
+  "Egr1",
+  "Zfp36",
+  "Jund",
+  "Ak1",
+  "Tef",
+  "Rhob",
+  "Rgs3",
+  "Sertad1",
+  "Klf6",
+  "Aebp1",
+  "Ptov1",
+  "Actg1",
+  "Ddx5",
+  "Ucp2",
+  "Thsd7a",
+  "Tcf21",
+  "Actn4",
+  "Itgav",
+  "Tbc1d1",
+  "Nuak2",
+  "Ctgf",
+  "Pde10a",
+  "Kazn",
+  "Zbtb16",
+  "Plod2",
+  "Palld",
+  "Sdf2l1",
+  "Cgnl1",
+  "Junb",
+  "Atf4",
+  "Nr4a3",
+  "Egr2",
+  "Klf4",
+  "Btg2",
+  "Adamts16",
+  "Arntl",
+  "mt-Nd4l",
+  "mt-Co2",
+  "mt-Nd2",
+  "mt-Atp8",
+  "Creld2",
+  "Pkdcc",
+  "Tsc22d3",
+  "Arl5a",
+  "Hspa5"
+)
+# Prepare volcano dataframe from df5
+volcano_df <- df3 %>%
+  mutate(
+    significance = case_when(
+      p_val_adj < 0.05 & avg_log2FC > 0.1 ~ "Up",
+      p_val_adj < 0.05 & avg_log2FC < -0.1 ~ "Down",
+      TRUE ~ "Not significant"
+    ),
+    neg_log10_padj = -log10(pmax(p_val_adj, 1e-300))
+  )
+
+# Subset only genes to label
+label_df <- volcano_df %>%
+  filter(gene %in% genes_to_label)
+
+# Volcano plot
+ggplot(volcano_df, aes(x = avg_log2FC, y = neg_log10_padj)) +
+  geom_point(aes(color = significance), alpha = 0.8, size = 2) +
+  geom_vline(xintercept = c(-0.1, 0.1), linetype = "dashed", linewidth = 0.5) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", linewidth = 0.5) +
+  geom_text_repel(
+    data = label_df,
+    aes(label = gene),
+    size = 3.5,
+    max.overlaps = Inf,
+    box.padding = 0.4,
+    point.padding = 0.2,
+    segment.color = "grey50"
+  ) +
+  scale_color_manual(values = c(
+    "Up" = "#D55E00",
+    "Down" = "#0072B2",
+    "Not significant" = "grey75"
+  )) +
+  theme_classic() +
+  theme(
+    axis.line = element_line(linewidth = 1),
+    axis.title = element_text(size = 18),
+    axis.text = element_text(size = 16),
+    legend.title = element_blank(),
+    plot.title = element_text(size = 20, face = "bold", hjust = 0.5),
+    legend.position = "none"
+  ) +  
+  labs(
+    title = "2T EVs vs 4M AS",
+    x = expression("Average log"[2] * " fold change"),
+    y = expression("-log"[10] * "(adjusted p-value)")
+  )
+```
+
+
+## Figure F 6M vs. WT
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+
+# Mouse gene symbols to highlight
+genes_to_label <- c(
+  "Col4a5",
+  "Col4a6",
+  "Thsd7a",
+  "Mafb",
+  "Ddn",
+  "Wif1",
+  "Angptl2",
+  "Glcci1",
+  "Plat",
+  "Gpc1",
+  "Npr1",
+  "Aebp1",
+  "Pabpn1",
+  "mt-Co1",
+  "mt-Co2",
+  "mt-Nd3",
+  "mt-Nd4l",
+  "mt-Atp6",
+  "Serpine1",
+  "Mmp2",
+  "Hspg2",
+  "Col4a1",
+  "Col4a2",
+  "Bgn",
+  "Ctgf",
+  "Tgfb1",
+  "Tgfb2",
+  "Tgfb3",
+  "Icam1",
+  "Cav1",
+  "Itga1",
+  "Lrp1",
+  "Sgk1",
+  "Ccnd1",
+  "Sparc"
+)
+
+# Prepare volcano dataframe from df5
+volcano_df <- df5 %>%
+  mutate(
+    significance = case_when(
+      p_val_adj < 0.05 & avg_log2FC > 0.1 ~ "Up",
+      p_val_adj < 0.05 & avg_log2FC < -0.1 ~ "Down",
+      TRUE ~ "Not significant"
+    ),
+    neg_log10_padj = -log10(pmax(p_val_adj, 1e-300))
+  )
+
+# Subset only genes to label
+label_df <- volcano_df %>%
+  filter(gene %in% genes_to_label)
+
+# Volcano plot
+ggplot(volcano_df, aes(x = avg_log2FC, y = neg_log10_padj)) +
+  geom_point(aes(color = significance), alpha = 0.8, size = 2) +
+  geom_vline(xintercept = c(-0.1, 0.1), linetype = "dashed", linewidth = 0.5) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", linewidth = 0.5) +
+  geom_text_repel(
+    data = label_df,
+    aes(label = gene),
+    size = 3.5,
+    max.overlaps = Inf,
+    box.padding = 0.4,
+    point.padding = 0.2,
+    segment.color = "grey50"
+  ) +
+  scale_color_manual(values = c(
+    "Up" = "#D55E00",
+    "Down" = "#0072B2",
+    "Not significant" = "grey75"
+  )) +
+  theme_classic() +
+  theme(
+    axis.line = element_line(linewidth = 1),
+    axis.title = element_text(size = 18),
+    axis.text = element_text(size = 16),
+    legend.title = element_blank(),
+    legend.text = element_text(size = 14),
+    plot.title = element_text(size = 20, face = "bold", hjust = 0.5),
+    legend.position = "none"
+  ) +  
+  labs(
+    title = "6M AS vs Wild Type",
+    x = expression("Average log"[2] * " fold change"),
+    y = expression("-log"[10] * "(adjusted p-value)")
+  )
+```
+
+
+# Session Info
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+sessionInfo()
+
+```
+

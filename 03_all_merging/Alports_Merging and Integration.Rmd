@@ -1,0 +1,464 @@
+---
+title: "Alports Merging and Filtering"
+author: "Jonathan Nelson"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document: 
+    toc: yes
+    toc_depth: 3
+    toc_float: true
+    number_sections: yes
+    theme: bootstrap
+    df_print: paged
+    code_folding: hide
+    highlight: pygments
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load Packages
+
+```{r load new packages, echo=TRUE, error=FALSE, message=FALSE, warning=FALSE}
+
+if (!require("knitr")) {install.packages("knitr"); require("knitr")}
+if (!requireNamespace('BiocManager', quietly = TRUE)) {install.packages('BiocManager'); require("BiocManager")}
+if (!require("dplyr")) {install.packages("dplyr"); require("dplyr")}
+if (!require("stringr")) {install.packages("stringr"); require("stringr")}
+if (!require("Seurat")) {install.packages("Seurat"); require("Seurat")}
+if (!require("sctransform")) {install.packages("sctransform"); require("sctransform")}
+if (!require("glmGamPoi")) {BiocManager::install('glmGamPoi'); require("glmGamPoi")}
+if (!require("patchwork")) {install.packages("patchwork"); require("patchwork")}
+if (!require("ggplot2")) {install.packages("ggplot2"); require("ggplot2")}
+if (!require("EnhancedVolcano")) {BiocManager::install('EnhancedVolcano'); require("EnhancedVolcano")}
+if (!require("DESeq2")) {BiocManager::install('DESeq2'); require("DESeq2")}
+if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")}
+if (!require("RColorBrewer")) {install.packages("RColorBrewer"); require("RColorBrewer")}
+if (!require("car")) {install.packages("car"); require("car")}
+if (!require("openxlsx")) {install.packages("openxlsx"); require("openxlsx")}
+if (!require("readxl")) {install.packages("readxl"); require("readxl")}
+if (!require("ggrepel")) {install.packages("ggrepel"); require("ggrepel")}
+if (!require("gghighlight")) {install.packages("gghighlight"); require("gghighlight")}
+if (!require("ggpmisc")) {install.packages("ggpmisc"); require("ggpmisc")}
+if (!require("data.table")) {install.packages("data.table"); require("data.table")}
+if (!require("here")) {install.packages("here"); require("here")}
+
+options(future.globals.maxSize = 74 * 1024^3) # 55 GB
+getOption("future.globals.maxSize") #59055800320
+
+here()
+```
+
+# Loading Filtered Seurat Object
+These files are post-DoubletFinder.
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+SO1 <- readRDS(here("outputs", "Alports_WT.rds"))
+SO2 <- readRDS(here("outputs", "Alports_4M.rds"))
+SO3 <- readRDS(here("outputs", "Alports_4M_EV.rds"))
+SO4 <- readRDS(here("outputs", "Alports_4M_2EV.rds"))
+SO5 <- readRDS(here("outputs", "Alports_6M.rds"))
+
+```
+
+# Nuclei Entering the Analysis Pipeline
+The following shows the number of nuclei post-QC and post-DoubletFinder. Numbers in `# (10X Count)` are the starting numbers for reference.  
+Values appear in the Environment when running the `rmd`.
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+SO1.nuc <- nrow(SO1@meta.data) 
+SO1.nuc
+SO2.nuc <- nrow(SO2@meta.data) 
+SO2.nuc
+SO3.nuc <- nrow(SO3@meta.data) 
+SO3.nuc
+SO4.nuc <- nrow(SO4@meta.data) 
+SO4.nuc
+SO5.nuc <- nrow(SO5@meta.data) 
+SO5.nuc
+
+
+head(SO1@meta.data)
+```
+
+# Merging Replicates
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+SO <- merge(SO1, y = c(SO2, SO3, SO4, SO5), project = "Alports")
+
+```
+
+# Add Metadata
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+meta <- read.xlsx(here("datasets", "metadata.xlsx"), sheet = 2)
+
+meta2 <- meta  %>% select(c("Sample.Name", "batch", "group", "group_num", "alports", "ev")) 
+
+df <- FetchData(SO, "sample") %>% rownames_to_column(var = "CellID")
+
+df <- left_join(df, meta2, by = c("sample" = "Sample.Name")) %>% column_to_rownames(var = "CellID")
+
+SO <- AddMetaData(SO, df)
+
+head(SO@meta.data)
+
+SO@meta.data$group <- factor(SO@meta.data$group, levels = c("WT", "4M_Alp", "4M_Alp_1EV", "4M_Alp_2EV", "6M_Alp"))
+
+```
+
+
+
+## Nuclei Filtering and Batch Comparison
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE, fig.width=10}
+
+
+VlnPlot(SO, 
+        features = c("nCount_RNA", "nFeature_RNA", "percent.mt"),
+        group.by = "group",
+        split.by = "sample")
+
+VlnPlot(SO, 
+        features = c("nCount_RNA", "nFeature_RNA", "percent.mt"),
+        group.by = "group",
+        split.by = "sample", pt.size = 0)
+
+```
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE}
+
+
+VlnPlot(SO, 
+        features = c("nCount_RNA", "nFeature_RNA", "percent.mt"),
+        group.by = "group")
+
+
+VlnPlot(SO, 
+        features = c("nCount_RNA", "nFeature_RNA", "percent.mt"),
+        group.by = "group", pt.size = 0)
+
+
+SO
+
+VlnPlot(SO, "percent.mt", group.by = "class_merge", split.by = "group", pt.size = 0) +
+  ylim(0, 2)
+
+
+SO <- readRDS(here("outputs", "Alports_041525.rds"))
+
+
+s.genes <- Seurat::cc.genes.updated.2019$s.genes
+g2m.genes <- Seurat::cc.genes.updated.2019$g2m.genes
+
+convert_human_to_mouse <- function(gene_list) {
+    output = c()
+    mouse_human_genes = read.csv("https://www.informatics.jax.org/downloads/reports/HOM_MouseHumanSequence.rpt",sep="\t")
+
+    for(gene in gene_list) {
+          class_key = (mouse_human_genes %>% filter(Symbol == gene & Common.Organism.Name == "human"))[['DB.Class.Key']]
+          if( !identical(class_key, integer(0)) ) {
+            human_genes = (mouse_human_genes %>% filter(DB.Class.Key == class_key & Common.Organism.Name=="mouse, laboratory"))[,"Symbol"]
+            for(human_gene in human_genes) {
+                output = rbind(c(gene, human_gene), output)
+            }
+          }
+     }
+     return (output)
+}
+
+s.genes  <- convert_human_to_mouse(s.genes)
+s.genes <- as.data.frame(s.genes)
+s.genes <- s.genes$V2
+
+g2m.genes  <- convert_human_to_mouse(g2m.genes)
+g2m.genes <- as.data.frame(g2m.genes)
+g2m.genes <- g2m.genes$V2
+
+SO <- CellCycleScoring(
+  object = SO,
+  s.features = s.genes,
+  g2m.features = g2m.genes,
+  set.ident = TRUE  # optional: sets Seurat identity to cell cycle phase
+)
+
+table(SO$Phase, SO@meta.data$group)
+
+DimPlot(SO, group.by = "Phase", label = TRUE) +
+  labs(title = "Cell Cycle Phase")
+
+SO2 <- subset(SO, subset = class_merge == "PODO")
+
+DimPlot(SO2)
+
+table(SO2$Phase, SO2@meta.data$group)
+
+t1 <- table(SO2$Phase, SO2@meta.data$group)[, c("WT", "4M_Alp", "4M_Alp_1EV", "4M_Alp_2EV", "6M_Alp")]
+t1
+
+prop.t1 <- prop.table(t1, margin = 2) 
+prop.t1
+
+t2 <- as.data.frame(t1)
+colnames(t2) <- c('Cell_type', 'Group', 'Frequency')
+
+# Original plot
+
+ggplot(t2, aes(fill=Cell_type, y=Frequency, x=Group)) + 
+  geom_bar(position="fill", stat = "identity", fun.y = "mean", colour="black") +
+  theme_classic()
+
+
+
+SO3 <- subset(SO, subset = class_merge == "EC")
+
+DimPlot(SO3)
+
+table(SO3$Phase, SO3@meta.data$group)
+
+t1 <- table(SO3$Phase, SO3@meta.data$group)[, c("WT", "4M_Alp", "4M_Alp_1EV", "4M_Alp_2EV", "6M_Alp")]
+t1
+
+prop.t1 <- prop.table(t1, margin = 2) 
+prop.t1
+
+t2 <- as.data.frame(t1)
+colnames(t2) <- c('Cell_type', 'Group', 'Frequency')
+
+# Original plot
+
+ggplot(t2, aes(fill=Cell_type, y=Frequency, x=Group)) + 
+  geom_bar(position="fill", stat = "identity", fun.y = "mean", colour="black") +
+  theme_classic()
+
+
+
+```
+
+
+## Chart of Nuclei Number
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, results = FALSE, message=FALSE, fig.align = 'center'}
+
+meta <- SO@meta.data
+
+# Keep only categorical columns (character or factor)
+meta_categorical <- meta %>%
+  select(sample, group, where(~ is.character(.x) || is.factor(.x)))
+
+# Pivot and count
+summary_df <- meta_categorical %>%
+  pivot_longer(cols = -c(sample, group), names_to = "meta_col", values_to = "meta_value") %>%
+  filter(meta_value == "Singlet") %>%
+  group_by(sample, group) %>%
+  summarise(n_cells = n(), .groups = "drop")
+
+summary_df
+
+summary_df$sample <- factor(summary_df$sample, 
+                            levels = summary_df %>%
+                              arrange(group, sample) %>%
+                              pull(sample) %>%
+                              unique())
+
+ggplot(summary_df, aes(x = sample, y = n_cells, fill = group)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  theme_minimal(base_size = 14) +
+  labs(title = "Number of Cells per Sample",
+       y = "Number of Cells",
+       x = "Sample",
+       fill = "Group") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_classic(base_size = 14)
+
+
+# Pivot and count
+summary_df2 <- meta_categorical %>%
+  pivot_longer(cols = -c(group), names_to = "meta_col", values_to = "meta_value") %>%
+  filter(meta_value == "Singlet") %>%
+  group_by(group) %>%
+  summarise(n_cells = n(), .groups = "drop")
+
+summary_df2
+
+ggplot(summary_df, aes(x = group, y = n_cells, fill = group)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  theme_minimal(base_size = 14) +
+  labs(title = "Number of Cells per Group",
+       y = "Number of Cells",
+       x = "Sample",
+       fill = "Group") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  theme_classic()
+
+
+```
+
+## Standard Seurat Pipeline
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, results = FALSE, message=FALSE, fig.align = 'center'}
+
+SO <- SCTransform(SO) %>%
+    RunPCA() %>%
+    FindNeighbors(dims = 1:30) %>%
+    FindClusters(resolution = 2) %>%
+    RunUMAP(dims = 1:30)
+
+DimPlot(SO, reduction = "umap", label = TRUE)
+
+DimPlot(SO, reduction = "umap", group.by = "group")
+
+DimPlot(SO, reduction = "umap", group.by = "class_merge")
+
+
+```
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, results = FALSE, message=FALSE, fig.align = 'center', fig.width=14}
+
+DimPlot(SO, reduction = "umap", split.by = "group")
+
+```
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+t1 <- table(SO@meta.data$class_merge, SO$group)[, c("WT", "4M_Alp", "4M_Alp_1EV", "4M_Alp_2EV", "6M_Alp")]
+t1
+
+prop.t1 <- prop.table(t1, margin = 2) 
+prop.t1
+
+t2 <- as.data.frame(t1)
+colnames(t2) <- c('Cell_type', 'Group', 'Frequency')
+
+# Original plot
+
+ggplot(t2, aes(fill=Cell_type, y=Frequency, x=Group)) + 
+  geom_bar(position="fill", stat = "identity", fun.y = "mean", colour="black") +
+  theme_classic()
+
+t1 <- table(SO@meta.data$class_merge, SO$sample)[, c("452", "453", "454", "365", "372", "474", "362", "368", "475", "364", "375", "473", "A", "B", "C")]
+t1
+
+prop.t1 <- prop.table(t1, margin = 2) 
+prop.t1
+
+t2 <- as.data.frame(t1)
+colnames(t2) <- c('Cell_type', 'Group', 'Frequency')
+
+# Original plot
+
+ggplot(t2, aes(fill=Cell_type, y=Frequency, x=Group)) + 
+  geom_bar(position="fill", stat = "identity", fun.y = "mean", colour="black") +
+  theme_classic()
+
+```
+
+## Filtering Non-Glom clusters
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center', fig.width=12}
+
+markers.to.plot1 <- c("Lrp2",         # PT
+                      "Slc5a12",      # PT-S1
+                      "Slc13a3",      # PT-S2
+                      "Slc16a9",      # PT-S3
+                      "Havcr1",       # Injured PT
+                      "Epha7",        # dTL
+                      "Cryab",        # dTL
+                      "Cdh13",        # dTL1
+                      "Slc14a2",      # dTL2
+                      "Slc12a1",      # TAL
+                      "Umod",         # TAL, DCT1
+                      "Egf",          # TAL, DCT1,
+                      "Cldn10",       # TAL
+                      "Cldn16",       # TAL
+                      "Nos1",         # MD
+                      "Slc12a3",      # DCT
+                      "Pvalb",        # DCT1
+                      "Slc8a1",       # DCT2, CNT
+                      "Aqp2",         # PC
+                      "Slc4a1",       # IC-A
+                      "Slc26a4",      # IC-B
+                      "Nphs2",        # Podo
+                      "Ncam1",        # PEC
+                      "Flt1",         # Endo
+                      "Emcn",         # Glom Endo
+                      "Kdr",          # Capillary Endo
+                      "Pdgfrb",       # Perivascular
+                      "Pdgfra",       # Fib
+                      "Piezo2",       # Mesangial
+                      "Acta2",        # Mural
+                      "Ptprc",        # Immune
+                      "Cd74",         # Macrophage
+                      "Skap1",        # B/T Cells 
+                      "Upk1b",        # Uro
+                      "Top2a"         # Proliferation
+)
+                      
+DotPlot(SO,
+features = markers.to.plot1,
+dot.scale = 8,
+dot.min = 0,
+scale.max = 100,
+scale.min = 0,
+col.min = -2.5,
+col.max = 2.5)+
+coord_flip()
+
+```
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, results = FALSE, message=FALSE, fig.align = 'center'}
+
+DimPlot(SO, group.by = "class_merge")
+
+FeaturePlot(SO, "Ehd3")
+FeaturePlot(SO, "Tspan7")
+FeaturePlot(SO, "Pi16")
+FeaturePlot(SO, "Plvap")
+FeaturePlot(SO, "Igfbp3", order = T)
+FeaturePlot(SO, "Npr3", order = T)
+FeaturePlot(SO, "Cryab", order = T)
+FeaturePlot(SO, "Aqp1", order = T)
+
+Idents(SO) <- SO$class_merge
+
+markers.EC <- FindMarkers(SO, ident.1 = "4M_Alp", ident.2 = "WT" , group.by = "group", subset.ident = "EC", logfc.threshold = 0.25, min.pct = 0.1)
+
+VlnPlot(SO, "Fabp4", group.by = "group", idents = "EC")
+VlnPlot(SO, "Fkbp5", group.by = "group", idents = "EC")
+VlnPlot(SO, "Zbtb16", group.by = "group", idents = "EC")
+VlnPlot(SO, "Gda", group.by = "group", idents = "EC")
+VlnPlot(SO, "Ly6a", group.by = "group", idents = "EC")
+VlnPlot(SO, "Lpl", group.by = "group", idents = "EC")
+VlnPlot(SO, "Insr", group.by = "group", idents = "EC")
+VlnPlot(SO, "Itgb3", group.by = "group", idents = "EC")
+
+VlnPlot(SO, "Fosb", group.by = "group", idents = "EC", split.by = "sample")
+
+VlnPlot(SO, "Col4a5", group.by = "group", idents = "PODO", split.by = "sample")
+
+VlnPlot(SO, "Col4a5", group.by = "group", idents = "PODO")
+
+FeaturePlot(SO, "Col4a5", split.by = "group", order = T)
+
+```
+
+# Save Object
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+saveRDS(SO, here("outputs", "Alports_041525.rds"))
+
+```
+
+# Session Info
+
+```{r sessioninfo, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+sessionInfo()
+
+```
+

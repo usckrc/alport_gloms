@@ -1,0 +1,397 @@
+---
+title: "Alports 6M Merging and Filtering"
+author: "Jonathan Nelson"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document: 
+    toc: yes
+    toc_depth: 3
+    toc_float: true
+    number_sections: yes
+    theme: bootstrap
+    df_print: paged
+    code_folding: hide
+    highlight: pygments
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load Packages
+
+```{r load new packages, echo=TRUE, error=FALSE, message=FALSE, warning=FALSE}
+
+if (!require("knitr")) {install.packages("knitr"); require("knitr")}
+if (!requireNamespace('BiocManager', quietly = TRUE)) {install.packages('BiocManager'); require("BiocManager")}
+if (!require("dplyr")) {install.packages("dplyr"); require("dplyr")}
+if (!require("stringr")) {install.packages("stringr"); require("stringr")}
+if (!require("Seurat")) {install.packages("Seurat"); require("Seurat")}
+if (!require("sctransform")) {install.packages("sctransform"); require("sctransform")}
+if (!require("glmGamPoi")) {BiocManager::install('glmGamPoi'); require("glmGamPoi")}
+if (!require("patchwork")) {install.packages("patchwork"); require("patchwork")}
+if (!require("ggplot2")) {install.packages("ggplot2"); require("ggplot2")}
+if (!require("EnhancedVolcano")) {BiocManager::install('EnhancedVolcano'); require("EnhancedVolcano")}
+if (!require("DESeq2")) {BiocManager::install('DESeq2'); require("DESeq2")}
+if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")}
+if (!require("RColorBrewer")) {install.packages("RColorBrewer"); require("RColorBrewer")}
+if (!require("car")) {install.packages("car"); require("car")}
+if (!require("openxlsx")) {install.packages("openxlsx"); require("openxlsx")}
+if (!require("readxl")) {install.packages("readxl"); require("readxl")}
+if (!require("ggrepel")) {install.packages("ggrepel"); require("ggrepel")}
+if (!require("gghighlight")) {install.packages("gghighlight"); require("gghighlight")}
+if (!require("ggpmisc")) {install.packages("ggpmisc"); require("ggpmisc")}
+if (!require("data.table")) {install.packages("data.table"); require("data.table")}
+if (!require("here")) {install.packages("here"); require("here")}
+
+options(future.globals.maxSize = 74 * 1024^3) # 55 GB
+getOption("future.globals.maxSize") #59055800320
+
+here()
+```
+
+# Loading Filtered Seurat Object
+These files are post-DoubletFinder.
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+One <- readRDS(here("outputs", "Alports_A.rds"))
+Two <- readRDS(here("outputs", "Alports_B.rds"))
+Three <- readRDS(here("outputs", "Alports_C.rds"))
+
+```
+
+# Nuclei Entering the Analysis Pipeline
+The following shows the number of nuclei post-QC and post-DoubletFinder. Numbers in `# (10X Count)` are the starting numbers for reference.  
+Values appear in the Environment when running the `rmd`.
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+One.nuc <- nrow(One@meta.data) 
+One.nuc
+Two.nuc <- nrow(Two@meta.data) 
+Two.nuc
+Three.nuc <- nrow(Three@meta.data) 
+Three.nuc
+
+```
+
+# Merging Replicates
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+SO <- merge(One, y = c(Two, Three), project = "Alports_6M")
+
+```
+
+## Nuclei Filtering and Batch Comparison
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE}
+
+head(SO@meta.data)
+
+VlnPlot(SO, 
+        features = c("nCount_RNA", "nFeature_RNA", "percent.mt"),
+        group.by = "sample")
+
+
+VlnPlot(SO, 
+        features = c("nCount_RNA", "nFeature_RNA", "percent.mt"),
+        group.by = "sample", pt.size = 0)
+
+
+SO
+
+```
+
+
+## Standard Seurat Pipeline
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, results = FALSE, message=FALSE, fig.show='hide', fig.align = 'center'}
+
+SO <- SCTransform(SO) %>%
+    RunPCA() %>%
+    FindNeighbors(dims = 1:30) %>%
+    FindClusters(resolution = 1) %>%
+    RunUMAP(dims = 1:30)
+```
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+DimPlot(SO, reduction = "umap", label = TRUE)
+
+DimPlot(SO, reduction = "umap", group.by = "sample")
+
+
+```
+
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center', fig.width=12}
+
+DimPlot(SO, reduction = "umap", split.by = "sample")
+
+```
+
+## Filtering Non-Glom clusters
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center', fig.width=12, fig.height=10}
+
+markers.to.plot1 <- c("Lrp2",         # PT
+                      "Slc5a12",      # PT-S1
+                      "Slc13a3",      # PT-S2
+                      "Slc16a9",      # PT-S3
+                      "Havcr1",       # Injured PT
+                      "Epha7",        # dTL
+                      "Cryab",        # dTL
+                      "Cdh13",        # dTL1
+                      "Slc14a2",      # dTL2
+                      "Slc12a1",      # TAL
+                      "Umod",         # TAL, DCT1
+                      "Egf",          # TAL, DCT1,
+                      "Cldn10",       # TAL
+                      "Cldn16",       # TAL
+                      "Nos1",         # MD
+                      "Slc12a3",      # DCT
+                      "Pvalb",        # DCT1
+                      "Slc8a1",       # DCT2, CNT
+                      "Aqp2",         # PC
+                      "Slc4a1",       # IC-A
+                      "Slc26a4",      # IC-B
+                      "Nphs2",        # Podo
+                      "Ncam1",        # PEC
+                      "Flt1",         # Endo
+                      "Emcn",         # Glom Endo
+                      "Kdr",          # Capillary Endo
+                      "Pdgfrb",       # Perivascular
+                      "Pdgfra",       # Fib
+                      "Piezo2",       # Mesangial
+                      "Acta2",        # Mural
+                      "Ptprc",        # Immune
+                      "Cd74",         # Macrophage
+                      "Skap1",        # B/T Cells 
+                      "Upk1b",        # Uro
+                      "Top2a"         # Proliferation
+)
+                      
+DotPlot(SO,
+features = markers.to.plot1,
+dot.scale = 8,
+dot.min = 0,
+scale.max = 100,
+scale.min = 0,
+col.min = -2.5,
+col.max = 2.5)+
+coord_flip()
+
+```
+
+
+## Annotate Clusters
+### subclass
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, results = FALSE, message=FALSE, fig.align = 'center'}
+
+
+SO2 <- SO
+
+SO2@meta.data <- SO2@meta.data %>% 
+  mutate(subclass_merge = dplyr::case_when(
+    seurat_clusters == 0  ~ "EC_1",
+    seurat_clusters == 1  ~ "EC_2",
+    seurat_clusters == 2  ~ "IMM_1",
+    seurat_clusters == 3  ~ "EC_3",
+    seurat_clusters == 4  ~ "EC_4",
+    seurat_clusters == 5  ~ "PODO",
+    seurat_clusters == 6  ~ "MES_1",
+    seurat_clusters == 7  ~ "PT",
+    seurat_clusters == 8  ~ "MES_2",
+    seurat_clusters == 9  ~ "Unique_1",
+    seurat_clusters == 10 ~ "PC",
+    seurat_clusters == 11 ~ "Unique_2",
+    seurat_clusters == 12 ~ "Unique_3",
+    seurat_clusters == 13 ~ "Unique_4",
+    seurat_clusters == 14 ~ "Unique_5",
+    seurat_clusters == 15 ~ "EC_5",
+    seurat_clusters == 16 ~ "PEC",
+    seurat_clusters == 17 ~ "IMM_2",
+    seurat_clusters == 18 ~ "IMM_3",
+    seurat_clusters == 19 ~ "DCT",
+    seurat_clusters == 20 ~ "IMM_4",
+    seurat_clusters == 21 ~ "EC_6",
+    seurat_clusters == 22 ~ "Unique_6",
+    seurat_clusters == 23 ~ "TAL",
+    seurat_clusters == 24 ~ "VSMC",
+    seurat_clusters == 25 ~ "IMM_5",
+    seurat_clusters == 26 ~ "Unique_7",
+    seurat_clusters == 27 ~ "EC_7",
+    seurat_clusters == 28 ~ "EC_8",
+    seurat_clusters == 29 ~ "Doublet"
+    ))
+
+#SO2@meta.data$class.Merge <- factor(SO2@meta.data$class.Merge , levels = c("Fibroblasts", "Medullary Fibroblasts", "Proliferating", "Mesangial Cells", "Pericytes", "Efferent #Artery", "Afferent Artery", "JGA"))
+
+DimPlot(object = SO2, reduction = "umap", group.by = "subclass_merge", label = TRUE)
+
+```
+
+### class
+
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, results = FALSE, message=FALSE, fig.align = 'center'}
+
+
+
+SO2@meta.data <- SO2@meta.data %>% 
+  mutate(class_merge = dplyr::case_when(
+    seurat_clusters == 0  ~ "EC",
+    seurat_clusters == 1  ~ "EC",
+    seurat_clusters == 2  ~ "IMM",
+    seurat_clusters == 3  ~ "EC",
+    seurat_clusters == 4  ~ "EC",
+    seurat_clusters == 5  ~ "PODO",
+    seurat_clusters == 6  ~ "MES",
+    seurat_clusters == 7  ~ "PT",
+    seurat_clusters == 8  ~ "MES",
+    seurat_clusters == 9  ~ "Unique_1",
+    seurat_clusters == 10 ~ "PC",
+    seurat_clusters == 11 ~ "Unique_2",
+    seurat_clusters == 12 ~ "Unique_3",
+    seurat_clusters == 13 ~ "Unique_4",
+    seurat_clusters == 14 ~ "Unique_5",
+    seurat_clusters == 15 ~ "EC",
+    seurat_clusters == 16 ~ "PEC",
+    seurat_clusters == 17 ~ "IMM",
+    seurat_clusters == 18 ~ "IMM",
+    seurat_clusters == 19 ~ "DCT",
+    seurat_clusters == 20 ~ "IMM",
+    seurat_clusters == 21 ~ "EC",
+    seurat_clusters == 22 ~ "Unique_6",
+    seurat_clusters == 23 ~ "TAL",
+    seurat_clusters == 24 ~ "VSMC",
+    seurat_clusters == 25 ~ "IMM",
+    seurat_clusters == 26 ~ "Unique_7",
+    seurat_clusters == 27 ~ "EC",
+    seurat_clusters == 28 ~ "EC",
+    seurat_clusters == 29 ~ "Doublet"
+    ))
+
+#SO2@meta.data$class.Merge <- factor(SO2@meta.data$class.Merge , levels = c("Fibroblasts", "Medullary Fibroblasts", "Proliferating", "Mesangial Cells", "Pericytes", "Efferent #Artery", "Afferent Artery", "JGA"))
+
+DimPlot(object = SO2, reduction = "umap", group.by = "class_merge", label = TRUE)
+
+```
+
+## Keep Glom Cell Types
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, results = FALSE, message=FALSE, fig.align = 'center'}
+
+Idents(SO2) <- SO2@meta.data$class_merge
+
+keep <- c("PODO", "EC", "MES", "IMM", "PEC", "VSMC")
+
+SO3 <- subset(SO2, subset = class_merge %in% keep)
+
+DimPlot(object = SO3, reduction = "umap", group.by = "class_merge", label = TRUE)
+```
+
+# Recluster #2
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, results = FALSE, message=FALSE, fig.align = 'center'}
+
+SO4 <- SCTransform(SO3) %>%
+    RunPCA() %>%
+    FindNeighbors(dims = 1:30) %>%
+    FindClusters(resolution = 1) %>%
+    RunUMAP(dims = 1:30)
+
+```
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, results = FALSE, message=FALSE, fig.align = 'center'}
+
+DimPlot(SO4, reduction = "umap", label = TRUE)
+
+DimPlot(SO4, reduction = "umap", group.by = "sample")
+
+```
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center', fig.width=12}
+
+DimPlot(SO4, reduction = "umap", split.by = "sample")
+
+```
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, results = FALSE, message=FALSE, fig.align = 'center'}
+
+
+DimPlot(SO4, reduction = "umap", group.by = "subclass_merge", label = TRUE)
+
+DimPlot(SO4, reduction = "umap", group.by = "class_merge", label = TRUE)
+
+```
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, results = FALSE, message=FALSE, fig.align = 'center',fig.width=12, fig.height=10}
+
+DotPlot(SO4,
+features = markers.to.plot1,
+dot.scale = 8,
+dot.min = 0,
+scale.max = 100,
+scale.min = 0,
+col.min = -2.5,
+col.max = 2.5)+
+coord_flip()
+
+```
+
+# Clean DotPlot
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, results = FALSE, message=FALSE, fig.align = 'center'}
+
+SO4 <- subset(SO4, subset = seurat_clusters == c("10"), invert = TRUE)
+
+Idents(SO4) <- SO4@meta.data$class_merge
+
+SO4@meta.data$class_merge <- factor(SO4@meta.data$class_merge , levels = c("PODO", "EC", "MES", "IMM", "PEC", "VSMC"))
+
+Idents(SO4) <- SO4@meta.data$class_merge
+
+markers.to.plot2 <- c("Nphs2",        # Podo
+                      "Flt1",         # Endo
+                      "Pdgfrb",       # Perivascular
+                      "Ptprc",        # Immune
+                      "Ncam1",        # PEC
+                      "Acta2"        # Mural
+)                      
+                      
+DotPlot(SO4,
+features = markers.to.plot2,
+dot.scale = 8,
+dot.min = 0,
+scale.max = 100,
+scale.min = 0,
+col.min = -2.5,
+col.max = 2.5)+
+coord_flip()
+
+for (i in markers.to.plot2)
+{
+  print(FeaturePlot(SO4, features = i, label = TRUE))
+}
+
+```
+
+# Save Object
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+saveRDS(SO4, here("outputs", "Alports_6M.rds"))
+
+```
+
+# Session Info
+
+```{r sessioninfo, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+sessionInfo()
+
+```
+

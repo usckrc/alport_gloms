@@ -1,0 +1,637 @@
+---
+title: "Alports EC: Geneset Quantification"
+author: "Jonathan Nelson"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document: 
+    toc: yes
+    toc_depth: 3
+    toc_float: true
+    number_sections: yes
+    theme: bootstrap
+    df_print: paged
+    code_folding: hide
+    highlight: pygments
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load Packages
+
+```{r load new packages, echo=TRUE, error=FALSE, message=FALSE, warning=FALSE}
+
+if (!require("knitr")) {install.packages("knitr"); require("knitr")}
+if (!requireNamespace('BiocManager', quietly = TRUE)) {install.packages('BiocManager'); require("BiocManager")}
+if (!require("dplyr")) {install.packages("dplyr"); require("dplyr")}
+if (!require("stringr")) {install.packages("stringr"); require("stringr")}
+if (!require("Seurat")) {install.packages("Seurat"); require("Seurat")}
+if (!require("sctransform")) {install.packages("sctransform"); require("sctransform")}
+if (!require("glmGamPoi")) {BiocManager::install('glmGamPoi'); require("glmGamPoi")}
+if (!require("patchwork")) {install.packages("patchwork"); require("patchwork")}
+if (!require("ggplot2")) {install.packages("ggplot2"); require("ggplot2")}
+if (!require("EnhancedVolcano")) {BiocManager::install('EnhancedVolcano'); require("EnhancedVolcano")}
+if (!require("DESeq2")) {BiocManager::install('DESeq2'); require("DESeq2")}
+if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")}
+if (!require("RColorBrewer")) {install.packages("RColorBrewer"); require("RColorBrewer")}
+if (!require("car")) {install.packages("car"); require("car")}
+if (!require("openxlsx")) {install.packages("openxlsx"); require("openxlsx")}
+if (!require("readxl")) {install.packages("readxl"); require("readxl")}
+if (!require("ggrepel")) {install.packages("ggrepel"); require("ggrepel")}
+if (!require("gghighlight")) {install.packages("gghighlight"); require("gghighlight")}
+if (!require("ggpmisc")) {install.packages("ggpmisc"); require("ggpmisc")}
+if (!require("data.table")) {install.packages("data.table"); require("data.table")}
+if (!require("here")) {install.packages("here"); require("here")}
+if (!require("clusterProfiler")) {BiocManager::install('clusterProfiler'); require("clusterProfiler")}
+if (!require("enrichplot")) {BiocManager::install('enrichplot'); require("enrichplot")}
+if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")} # for data frame transformation
+if (!require("gplots")) {install.packages("gplots"); require("gplots")}
+if (!require("ggvenn")) {install.packages("ggvenn"); require("ggvenn")}
+if (!require("ggrepel")) {install.packages("ggrepel"); require("ggrepel")}
+
+# library("EnhancedVolcano")
+library(UpSetR)
+library(ComplexHeatmap)
+#install.packages("ggtext")
+library(ggtext)
+library(pheatmap)
+
+
+options(future.globals.maxSize = 74 * 1024^3) # 55 GB
+getOption("future.globals.maxSize") #59055800320
+
+here()
+
+```
+# Introduction
+
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+SO_EC_Clean <- readRDS(here("outputs", "Alports_Glom_EC.rds"))
+
+DimPlot(SO_EC_Clean)
+
+```
+# Identifying Reversal Genes
+
+## Set the conditions
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+wb <- loadWorkbook(here("datasets", "IPA pathways _updated_08_18_2025 .xlsx"))
+
+# Get sheet names
+sheets <- getSheetNames(here("datasets", "IPA pathways _updated_08_18_2025 .xlsx"))
+
+# Initialize an empty list
+pathway_list <- list()
+
+# Loop through each sheet
+for (sheet in sheets) {
+  # Read the entire sheet
+  data <- read.xlsx(wb, sheet = sheet, colNames = FALSE)
+  
+  # Extract the name from cell A1
+  list_name <- as.character(data[1, 1])
+  
+  # Extract all values from column B, starting from row 2 (since row 1 is A1 and likely the header of column B)
+  values <- data[-1, 2, drop = TRUE]
+  
+  # Remove NAs and convert to character vector
+  values <- as.character(values[!is.na(values)])
+  
+  # Add to list using the name from A1
+  pathway_list[[list_name]] <- values
+}
+
+# View the list
+str(pathway_list)
+
+pathway_list
+```
+
+## Mitochondrial dysfunction
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+df1 <- list(pathway_list$`Mitochondria dysfunction`)
+
+SO_EC_Clean <- AddModuleScore(object = SO_EC_Clean , features = df1, name = "Mitochondria_dysfunction")
+
+VlnPlot(SO_EC_Clean, features = "Mitochondria_dysfunction1", group.by = "group")
+
+VlnPlot(SO_EC_Clean, features = "Mitochondria_dysfunction1", group.by = "group", pt.size = 0)
+
+kruskal.test(Mitochondria_dysfunction1 ~ group, data = SO_EC_Clean@meta.data)
+
+pairwise.wilcox.test(
+  x = SO_EC_Clean@meta.data$Mitochondria_dysfunction1,
+  g = SO_EC_Clean@meta.data$group,
+  p.adjust.method = "BH"  # or "bonferroni", "holm", etc.
+)
+
+group_means <- SO_EC_Clean@meta.data %>%
+  group_by(group) %>%
+  summarize(mito_dysfunction = mean(Mitochondria_dysfunction1, na.rm = TRUE))
+
+heatmap_data <- as.matrix(group_means %>% column_to_rownames("group"))
+
+pheatmap(heatmap_data, cluster_rows = FALSE, cluster_cols = FALSE, scale = "column",
+         color = colorRampPalette(c("white", "red"))(50))
+
+df2 <- heatmap_data
+```
+
+
+## Mitochondrial division
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+df1 <- list(pathway_list$`Mitochondrial Division Signaling Pathway`)
+
+SO_EC_Clean <- AddModuleScore(object = SO_EC_Clean , features = df1, name = "Mitochondria_division")
+
+VlnPlot(SO_EC_Clean, features = "Mitochondria_division1", group.by = "group")
+
+VlnPlot(SO_EC_Clean, features = "Mitochondria_division1", group.by = "group", pt.size = 0)
+
+kruskal.test(Mitochondria_division1 ~ group, data = SO_EC_Clean@meta.data)
+
+pairwise.wilcox.test(
+  x = SO_EC_Clean@meta.data$Mitochondria_division1,
+  g = SO_EC_Clean@meta.data$group,
+  p.adjust.method = "BH"  # or "bonferroni", "holm", etc.
+)
+
+group_means <- SO_EC_Clean@meta.data %>%
+  group_by(group) %>%
+  summarize(mito_division = mean(Mitochondria_division1, na.rm = TRUE))
+
+heatmap_data <- as.matrix(group_means %>% column_to_rownames("group"))
+
+pheatmap(heatmap_data, cluster_rows = FALSE, cluster_cols = FALSE, scale = "column",
+         color = colorRampPalette(c("white", "red"))(50))
+
+df3 <- heatmap_data
+```
+
+
+## mTor
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+df1 <- list(pathway_list$`m`)
+
+SO_EC_Clean <- AddModuleScore(object = SO_EC_Clean , features = df1, name = "mTor")
+
+VlnPlot(SO_EC_Clean, features = "mTor1", group.by = "group")
+
+VlnPlot(SO_EC_Clean, features = "mTor1", group.by = "group", pt.size = 0)
+
+kruskal.test(mTor1 ~ group, data = SO_EC_Clean@meta.data)
+
+pairwise.wilcox.test(
+  x = SO_EC_Clean@meta.data$mTor1,
+  g = SO_EC_Clean@meta.data$group,
+  p.adjust.method = "BH"  # or "bonferroni", "holm", etc.
+)
+
+group_means <- SO_EC_Clean@meta.data %>%
+  group_by(group) %>%
+  summarize(mTor = mean(mTor1, na.rm = TRUE))
+
+heatmap_data <- as.matrix(group_means %>% column_to_rownames("group"))
+
+pheatmap(heatmap_data, cluster_rows = FALSE, cluster_cols = FALSE, scale = "column",
+         color = colorRampPalette(c("white", "red"))(50))
+
+df4 <- heatmap_data
+```
+
+## OxPhos
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+df1 <- list(pathway_list$`Oxidative Phosphorylation`)
+
+SO_EC_Clean <- AddModuleScore(object = SO_EC_Clean , features = df1, name = "OxPhos")
+
+VlnPlot(SO_EC_Clean, features = "OxPhos1", group.by = "group")
+
+VlnPlot(SO_EC_Clean, features = "OxPhos1", group.by = "group", pt.size = 0)
+
+kruskal.test(OxPhos1 ~ group, data = SO_EC_Clean@meta.data)
+
+pairwise.wilcox.test(
+  x = SO_EC_Clean@meta.data$OxPhos1,
+  g = SO_EC_Clean@meta.data$group,
+  p.adjust.method = "BH"  # or "bonferroni", "holm", etc.
+  )
+
+group_means <- SO_EC_Clean@meta.data %>%
+  group_by(group) %>%
+  summarize(OxPhos = mean(OxPhos1, na.rm = TRUE))
+
+heatmap_data <- as.matrix(group_means %>% column_to_rownames("group"))
+
+pheatmap(heatmap_data, cluster_rows = FALSE, cluster_cols = FALSE, scale = "column",
+         color = colorRampPalette(c("white", "red"))(50))
+
+df5 <- heatmap_data
+```
+
+## PI Metabolism
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+df1 <- list(pathway_list$`PI Metabolism`)
+
+SO_EC_Clean <- AddModuleScore(object = SO_EC_Clean , features = df1, name = "PI_met")
+
+VlnPlot(SO_EC_Clean, features = "PI_met1", group.by = "group")
+
+VlnPlot(SO_EC_Clean, features = "PI_met1", group.by = "group", pt.size = 0)
+
+kruskal.test(PI_met1 ~ group, data = SO_EC_Clean@meta.data)
+
+pairwise.wilcox.test(
+  x = SO_EC_Clean@meta.data$PI_met1,
+  g = SO_EC_Clean@meta.data$group,
+  p.adjust.method = "BH"  # or "bonferroni", "holm", etc.
+)
+
+group_means <- SO_EC_Clean@meta.data %>%
+  group_by(group) %>%
+  summarize(PI_met = mean(PI_met1, na.rm = TRUE))
+
+heatmap_data <- as.matrix(group_means %>% column_to_rownames("group"))
+
+pheatmap(heatmap_data, cluster_rows = FALSE, cluster_cols = FALSE, scale = "column",
+         color = colorRampPalette(c("white", "red"))(50))
+
+df6 <- heatmap_data
+```
+
+## Mito protein degradation
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+df1 <- list(pathway_list$`Mito protein degradation`)
+
+SO_EC_Clean <- AddModuleScore(object = SO_EC_Clean , features = df1, name = "Mito_degradation")
+
+VlnPlot(SO_EC_Clean, features = "Mito_degradation1", group.by = "group")
+
+VlnPlot(SO_EC_Clean, features = "Mito_degradation1", group.by = "group", pt.size = 0)
+
+kruskal.test(Mito_degradation1 ~ group, data = SO_EC_Clean@meta.data)
+
+pairwise.wilcox.test(
+  x = SO_EC_Clean@meta.data$Mito_degradation1,
+  g = SO_EC_Clean@meta.data$group,
+  p.adjust.method = "BH"  # or "bonferroni", "holm", etc.
+)
+
+group_means <- SO_EC_Clean@meta.data %>%
+  group_by(group) %>%
+  summarize(Mito_degradation = mean(Mito_degradation1, na.rm = TRUE))
+
+heatmap_data <- as.matrix(group_means %>% column_to_rownames("group"))
+
+pheatmap(heatmap_data, cluster_rows = FALSE, cluster_cols = FALSE, scale = "column",
+         color = colorRampPalette(c("white", "red"))(50))
+
+df7 <- heatmap_data
+```
+
+## eNoS signaling
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+df1 <- list(pathway_list$`eNOS signaling`)
+
+SO_EC_Clean <- AddModuleScore(object = SO_EC_Clean , features = df1, name = "eNos")
+
+VlnPlot(SO_EC_Clean, features = "eNos1", group.by = "group")
+
+VlnPlot(SO_EC_Clean, features = "eNos1", group.by = "group", pt.size = 0)
+
+kruskal.test(eNos1 ~ group, data = SO_EC_Clean@meta.data)
+
+pairwise.wilcox.test(
+  x = SO_EC_Clean@meta.data$eNos1,
+  g = SO_EC_Clean@meta.data$group,
+  p.adjust.method = "BH"  # or "bonferroni", "holm", etc.
+)
+
+
+group_means <- SO_EC_Clean@meta.data %>%
+  group_by(group) %>%
+  summarize(eNos = mean(eNos1, na.rm = TRUE))
+
+heatmap_data <- as.matrix(group_means %>% column_to_rownames("group"))
+
+pheatmap(heatmap_data, cluster_rows = FALSE, cluster_cols = FALSE, scale = "column",
+         color = colorRampPalette(c("white", "red"))(50))
+
+df8 <- heatmap_data
+
+```
+
+## Integration of energy metabolism
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+df1 <- list(pathway_list$`Integration of energy metabolism`)
+
+SO_EC_Clean <- AddModuleScore(object = SO_EC_Clean , features = df1, name = "Integration")
+
+VlnPlot(SO_EC_Clean, features = "Integration1", group.by = "group")
+
+VlnPlot(SO_EC_Clean, features = "Integration1", group.by = "group", pt.size = 0)
+
+kruskal.test(Integration1 ~ group, data = SO_EC_Clean@meta.data)
+
+pairwise.wilcox.test(
+  x = SO_EC_Clean@meta.data$Integration1,
+  g = SO_EC_Clean@meta.data$group,
+  p.adjust.method = "BH"  # or "bonferroni", "holm", etc.
+)
+
+
+group_means <- SO_EC_Clean@meta.data %>%
+  group_by(group) %>%
+  summarize(Integration = mean(Integration1, na.rm = TRUE))
+
+heatmap_data <- as.matrix(group_means %>% column_to_rownames("group"))
+
+pheatmap(heatmap_data, cluster_rows = FALSE, cluster_cols = FALSE, scale = "column",
+         color = colorRampPalette(c("white", "red"))(50))
+
+df9 <- heatmap_data
+```
+
+## Accumulation of Lipids
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+df1 <- list(pathway_list$`Accumulation of Lipids`)
+
+SO_EC_Clean <- AddModuleScore(object = SO_EC_Clean , features = df1, name = "Lipids")
+
+VlnPlot(SO_EC_Clean, features = "Lipids1", group.by = "group")
+
+VlnPlot(SO_EC_Clean, features = "Lipids1", group.by = "group", pt.size = 0)
+
+kruskal.test(Lipids1 ~ group, data = SO_EC_Clean@meta.data)
+
+pairwise.wilcox.test(
+  x = SO_EC_Clean@meta.data$Lipids1,
+  g = SO_EC_Clean@meta.data$group,
+  p.adjust.method = "BH"  # or "bonferroni", "holm", etc.
+)
+
+
+group_means <- SO_EC_Clean@meta.data %>%
+  group_by(group) %>%
+  summarize(Lipids = mean(Lipids1, na.rm = TRUE))
+
+heatmap_data <- as.matrix(group_means %>% column_to_rownames("group"))
+
+pheatmap(heatmap_data, cluster_rows = FALSE, cluster_cols = FALSE, scale = "column",
+         color = colorRampPalette(c("white", "red"))(50))
+
+df10 <- heatmap_data
+```
+
+##  Metabolism of Membrane Lipid Derivatives
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+df1 <- list(pathway_list$`Metabolism of Membrane Lipid Derivatives`)
+
+SO_EC_Clean <- AddModuleScore(object = SO_EC_Clean , features = df1, name = "Derivatives")
+
+VlnPlot(SO_EC_Clean, features = "Derivatives1", group.by = "group")
+
+VlnPlot(SO_EC_Clean, features = "Derivatives1", group.by = "group", pt.size = 0)
+
+kruskal.test(Derivatives1 ~ group, data = SO_EC_Clean@meta.data)
+
+pairwise.wilcox.test(
+  x = SO_EC_Clean@meta.data$Derivatives1,
+  g = SO_EC_Clean@meta.data$group,
+  p.adjust.method = "BH"  # or "bonferroni", "holm", etc.
+)
+
+
+group_means <- SO_EC_Clean@meta.data %>%
+  group_by(group) %>%
+  summarize(Derivatives = mean(Derivatives1, na.rm = TRUE))
+
+heatmap_data <- as.matrix(group_means %>% column_to_rownames("group"))
+
+pheatmap(heatmap_data, cluster_rows = FALSE, cluster_cols = FALSE, scale = "column",
+         color = colorRampPalette(c("white", "red"))(50))
+
+df11 <- heatmap_data
+```
+
+## Synthesis of Lipid
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+df1 <- list(pathway_list$`Synthesis of Lipid`)
+
+SO_EC_Clean <- AddModuleScore(object = SO_EC_Clean , features = df1, name = "Synthesis")
+
+VlnPlot(SO_EC_Clean, features = "Synthesis1", group.by = "group")
+
+VlnPlot(SO_EC_Clean, features = "Synthesis1", group.by = "group", pt.size = 0)
+
+kruskal.test(Synthesis1 ~ group, data = SO_EC_Clean@meta.data)
+
+pairwise.wilcox.test(
+  x = SO_EC_Clean@meta.data$Synthesis1,
+  g = SO_EC_Clean@meta.data$group,
+  p.adjust.method = "BH"  # or "bonferroni", "holm", etc.
+)
+
+
+group_means <- SO_EC_Clean@meta.data %>%
+  group_by(group) %>%
+  summarize(Synthesis = mean(Synthesis1, na.rm = TRUE))
+
+heatmap_data <- as.matrix(group_means %>% column_to_rownames("group"))
+
+pheatmap(heatmap_data, cluster_rows = FALSE, cluster_cols = FALSE, scale = "column",
+         color = colorRampPalette(c("white", "red"))(50))
+
+df12 <- heatmap_data
+```
+
+## ER-Mitochonrial Communication Signaling 
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+df1 <- list(pathway_list$`ER-Mitochonrial Communication Signaling `)
+
+SO_EC_Clean <- AddModuleScore(object = SO_EC_Clean , features = df1, name = "ER_Mito")
+
+VlnPlot(SO_EC_Clean, features = "ER_Mito1", group.by = "group")
+
+VlnPlot(SO_EC_Clean, features = "ER_Mito1", group.by = "group", pt.size = 0)
+
+kruskal.test(ER_Mito1 ~ group, data = SO_EC_Clean@meta.data)
+
+pairwise.wilcox.test(
+  x = SO_EC_Clean@meta.data$ER_Mito1,
+  g = SO_EC_Clean@meta.data$group,
+  p.adjust.method = "BH"  # or "bonferroni", "holm", etc.
+)
+
+
+group_means <- SO_EC_Clean@meta.data %>%
+  group_by(group) %>%
+  summarize(ER_Mito = mean(ER_Mito1, na.rm = TRUE))
+
+heatmap_data <- as.matrix(group_means %>% column_to_rownames("group"))
+
+pheatmap(heatmap_data, cluster_rows = FALSE, cluster_cols = FALSE, scale = "column",
+         color = colorRampPalette(c("white", "red"))(50))
+
+df13 <- heatmap_data
+```
+
+## NAD signaling 
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+df1 <- list(pathway_list$`NAD signaling`)
+
+SO_EC_Clean <- AddModuleScore(object = SO_EC_Clean , features = df1, name = "NAD")
+
+VlnPlot(SO_EC_Clean, features = "NAD1", group.by = "group")
+
+VlnPlot(SO_EC_Clean, features = "NAD1", group.by = "group", pt.size = 0)
+
+kruskal.test(NAD1 ~ group, data = SO_EC_Clean@meta.data)
+
+pairwise.wilcox.test(
+  x = SO_EC_Clean@meta.data$NAD1,
+  g = SO_EC_Clean@meta.data$group,
+  p.adjust.method = "BH"  # or "bonferroni", "holm", etc.
+)
+
+
+group_means <- SO_EC_Clean@meta.data %>%
+  group_by(group) %>%
+  summarize(NAD = mean(NAD1, na.rm = TRUE))
+
+heatmap_data <- as.matrix(group_means %>% column_to_rownames("group"))
+
+pheatmap(heatmap_data, cluster_rows = FALSE, cluster_cols = FALSE, scale = "column",
+         color = colorRampPalette(c("white", "red"))(50))
+
+df14 <- heatmap_data
+```
+
+
+## All Pathways
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+# Convert all to data.frames (if not already)
+df_list <- list(df2, df3, df4, df5, df6, df7, df8, df9, df10, df11, df12, df13, df14)
+df_list <- lapply(df_list, as.data.frame)
+
+# Find common rownames across all dataframes
+common_rows <- Reduce(intersect, lapply(df_list, rownames))
+
+# Subset each dataframe to common rows, in the same order
+df_list_sub <- lapply(df_list, function(df) df[common_rows, , drop = FALSE])
+
+# Combine all dataframes by columns
+merged_df <- do.call(cbind, df_list_sub)
+
+# Convert to numeric matrix (important if some columns are factors/characters)
+heatmap_data <- as.matrix(merged_df)
+
+# Optional: check if any non-numeric columns exist and convert or remove them
+if(any(!sapply(heatmap_data, is.numeric))) {
+  stop("Non-numeric columns detected in heatmap_data. Please convert or remove them.")
+}
+
+# Plot heatmap
+pheatmap(
+  heatmap_data,
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  scale = "column",  # scales each column (group) to mean=0, sd=1
+  color = colorRampPalette(c("white", "red"))(50)
+)
+
+
+```
+
+## All Pathways
+### Remove the 6M Group
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+# Convert all to data.frames (if not already)
+df_list <- list(df2, df3, df4, df5, df6, df7, df8, df9, df10, df11, df12, df13, df14)
+df_list <- lapply(df_list, as.data.frame)
+
+# Find common rownames across all dataframes
+common_rows <- Reduce(intersect, lapply(df_list, rownames))
+
+# Subset each dataframe to common rows, in the same order
+df_list_sub <- lapply(df_list, function(df) df[common_rows, , drop = FALSE])
+
+# Combine all dataframes by columns
+merged_df <- do.call(cbind, df_list_sub)
+
+# Convert to numeric matrix (important if some columns are factors/characters)
+heatmap_data <- as.matrix(merged_df)
+
+heatmap_data <- heatmap_data[rownames(heatmap_data) != "6M_Alp", ]
+
+# Optional: check if any non-numeric columns exist and convert or remove them
+if(any(!sapply(heatmap_data, is.numeric))) {
+  stop("Non-numeric columns detected in heatmap_data. Please convert or remove them.")
+}
+
+# Plot heatmap
+pheatmap(
+  heatmap_data,
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  scale = "column",  # scales each column (group) to mean=0, sd=1
+  color = colorRampPalette(c("white", "red"))(50)
+)
+
+
+```
+
+
+
+# Extract the data
+scores <- SO_EC_Clean@meta.data$Integration1
+groups <- SO_EC_Clean@meta.data$group
+
+# Wilcoxon test (for two groups)
+anova_result <- aov(SO_EC_Clean@meta.data$Integration1 ~ SO_EC_Clean@meta.data$group, data = SO_EC_Clean@meta.data)
+summary(anova_result)
+TukeyHSD(anova_result)
+
+
+# Session Info
+
+```{r sessioninfo, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+sessionInfo()
+
+```
+
